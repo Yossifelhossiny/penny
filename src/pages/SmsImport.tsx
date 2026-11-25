@@ -174,9 +174,12 @@ export function SmsImport({ onNavigate }: Props) {
   const selectedItems = reviewItems.filter(
     (it) => it.selected && it.action !== 'ignore' && !it.isBalanceOnly
   );
-  const totalSelectedPiastres = selectedItems.reduce((sum, it) => {
-    return sum + Math.round((parseFloat(it.amountEgp) || 0) * 100);
-  }, 0);
+  const sumFor = (action: string) =>
+    selectedItems
+      .filter((it) => it.action === action)
+      .reduce((sum, it) => sum + Math.round((parseFloat(it.amountEgp) || 0) * 100), 0);
+  const selectedInPiastres = sumFor('income');
+  const selectedOutPiastres = sumFor('expense');
 
   const duplicateCount = reviewItems.filter(
     (it) => it.isBatchDuplicate || it.isDbDuplicate
@@ -466,9 +469,11 @@ export function SmsImport({ onNavigate }: Props) {
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-xs text-text-muted">Total Amount</p>
-                <p className="text-base font-bold text-primary">
-                  {formatEGP(totalSelectedPiastres)}
+                <p className="text-xs text-text-muted">Money In / Out</p>
+                <p className="text-sm font-bold">
+                  <span className="text-success">+{formatEGP(selectedInPiastres)}</span>
+                  <span className="text-text-muted"> / </span>
+                  <span className="text-danger">-{formatEGP(selectedOutPiastres)}</span>
                 </p>
               </div>
             </div>

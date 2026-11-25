@@ -6,6 +6,7 @@
  */
 
 import { db } from '../db';
+import { toLocalDateInput } from '../utils/format';
 import type { Account, Transaction, Category, Budget, SavingsGoal } from '../types';
 
 export interface PennyBackupData {
@@ -70,7 +71,7 @@ export async function downloadJsonBackup(): Promise<void> {
   const blob = new Blob([jsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
 
-  const dateStr = new Date().toISOString().slice(0, 10);
+  const dateStr = toLocalDateInput(new Date());
   const a = document.createElement('a');
   a.href = url;
   a.download = `penny-backup-${dateStr}.json`;
@@ -310,7 +311,7 @@ export async function exportTransactionsCsv(filter?: {
     const toAcc = t.toAccountId ? accountMap.get(t.toAccountId) : null;
     const cat = t.categoryId ? categoryMap.get(t.categoryId) : null;
 
-    const dateStr = t.date.toISOString().slice(0, 10);
+    const dateStr = toLocalDateInput(t.date);
     const timeStr = t.date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const amountEgp = (t.amount / 100).toFixed(2);
 
@@ -349,7 +350,7 @@ export async function downloadTransactionsCsv(filter?: {
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
 
-  const defaultName = filter?.filename || `penny-transactions-${new Date().toISOString().slice(0, 10)}.csv`;
+  const defaultName = filter?.filename || `penny-transactions-${toLocalDateInput(new Date())}.csv`;
   const a = document.createElement('a');
   a.href = url;
   a.download = defaultName;

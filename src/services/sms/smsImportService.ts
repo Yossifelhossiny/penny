@@ -255,7 +255,7 @@ export function createReviewItem(
     const incomeCats = categories.filter(c => c.type === 'income');
     const salaryCat = incomeCats.find(c => c.name.toLowerCase().includes('salary'));
     const otherIncome = incomeCats.find(c => c.name.toLowerCase().includes('other'));
-    defaultCategoryId = (salaryCat ?? otherIncome ?? incomeCats[0])?.id;
+    defaultCategoryId = (otherIncome ?? salaryCat ?? incomeCats[0])?.id;
   } else if (action === 'expense') {
     const expenseCats = categories.filter(c => c.type === 'expense');
     if (parsed.transactionType === 'mobile_recharge') {
@@ -298,9 +298,16 @@ export function createReviewItem(
     dateUnresolved = false;
   } else if (parsed.date?.yearMissing) {
     dateUnresolved = true;
-    const resolved = resolveDateWithYear(parsed.date.raw, now.getFullYear());
+    let year = now.getFullYear();
+    let resolved = resolveDateWithYear(parsed.date.raw, year);
+    // An SMS can't come from the future: e.g. "28/12" pasted on 2 January
+    // belongs to last year.
+    if (resolved.getTime() > now.getTime() + 24 * 60 * 60 * 1000) {
+      year -= 1;
+      resolved = resolveDateWithYear(parsed.date.raw, year);
+    }
     dateStr = toInputDateTime(resolved);
-    dateWarning = `Missing year in SMS ('${parsed.date.raw}'). Year defaulted to ${now.getFullYear()} — please verify.`;
+    dateWarning = `Missing year in SMS ('${parsed.date.raw}'). Year defaulted to ${year} — please verify.`;
   } else if (parsed.date === null) {
     dateUnresolved = true;
     dateWarning = 'No date found in SMS. Defaulted to current time.';
@@ -512,7 +519,7 @@ export async function saveConfirmedReviewItems(
           await addExpense({
             amount: feePiastres,
             accountId: item.accountId,
-            categoryId: item.feeCategoryId || item.categoryId || 1,
+            categoryId: item.feeCategoryId ?? item.categoryId!,
             note: `Fee for ${referenceId ? 'ref ' + referenceId : 'transaction'}`,
             date,
             originalSms: `[Fee] ${originalSms}`,

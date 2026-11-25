@@ -121,6 +121,26 @@ describe('smsImportService', () => {
   });
 
   describe('processSmsBatch', () => {
+    it('defaults received money to Other Income, not Salary', async () => {
+      const otherId = await db.categories.add({ name: 'Other Income', icon: '📥', type: 'income', color: '#14b8a6' });
+      const cats = await db.categories.toArray();
+      const sms = 'تم استلام مبلغ 200 جنيه من رقم 01015147307 المسجل بإسم Mohamed K Eissa معرف 019756663531 26-05-06 13:32';
+      const items = await processSmsBatch(sms, testAccounts, cats);
+      expect(items[0].action).toBe('income');
+      expect(items[0].categoryId).toBe(otherId);
+    });
+
+    it('never puts a year-less SMS date in the future', async () => {
+      const now = new Date();
+      const tomorrowPlus = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+      const dd = String(tomorrowPlus.getDate()).padStart(2, '0');
+      const mm = String(tomorrowPlus.getMonth() + 1).padStart(2, '0');
+      const sms = `تم خصم 50.00EGP من بطاقة المدفوعة مقدماً رقم 3956 عند SHOP يوم ${dd}/${mm} الساعه 10:00 المتاح 100.00`;
+      const items = await processSmsBatch(sms, testAccounts, testCategories);
+      expect(new Date(items[0].dateStr).getTime()).toBeLessThanOrEqual(now.getTime());
+      expect(items[0].dateWarning).toContain(String(tomorrowPlus.getFullYear() - 1));
+    });
+
     it('processes card purchase and detects unresolved date without year', async () => {
       const sms = 'تم خصم 160.00EGP من بطاقة المدفوعة مقدماً رقم 3956 عند PAYMOB-*vasko egypt TA يوم 09/05 الساعه 17:09 المتاح 3313.78 للمزيد إتصل ب 19623';
       const items = await processSmsBatch(sms, testAccounts, testCategories);

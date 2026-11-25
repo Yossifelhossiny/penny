@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { SavingsGoal } from '../../types';
 import { createSavingsGoal, updateSavingsGoal, deleteSavingsGoal } from '../../services/budgets';
-import { toPiastres } from '../../utils/format';
+import { toPiastres, toLocalDateInput, parseLocalDateInput } from '../../utils/format';
 
 interface Props {
   goal?: SavingsGoal;
@@ -24,7 +24,7 @@ export function SavingsGoalModal({ goal, onClose, onSaved, onDeleted }: Props) {
     goal ? (goal.currentAmountPiastres / 100).toString() : '0'
   );
   const [targetDateStr, setTargetDateStr] = useState(
-    goal?.targetDate ? new Date(goal.targetDate).toISOString().slice(0, 10) : ''
+    goal?.targetDate ? toLocalDateInput(new Date(goal.targetDate)) : ''
   );
   const [icon, setIcon] = useState(goal?.icon ?? GOAL_ICONS[0]);
   const [color, setColor] = useState(goal?.color ?? GOAL_COLORS[0]);
@@ -58,7 +58,7 @@ export function SavingsGoalModal({ goal, onClose, onSaved, onDeleted }: Props) {
     try {
       const targetPiastres = toPiastres(targetEgp);
       const currentPiastres = toPiastres(currentEgp);
-      const targetDate = targetDateStr ? new Date(targetDateStr) : null;
+      const targetDate = targetDateStr ? parseLocalDateInput(targetDateStr) : null;
 
       if (isEditing) {
         await updateSavingsGoal(goal.id!, {

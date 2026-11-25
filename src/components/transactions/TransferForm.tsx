@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db';
 import { addTransfer } from '../../services/transactions';
-import { toPiastres, formatEGP } from '../../utils/format';
+import { toPiastres, formatEGP, toLocalDateTimeInput } from '../../utils/format';
 import { getAllBalances } from '../../services/transactions';
 import { useEffect } from 'react';
 
@@ -17,7 +17,7 @@ export function TransferForm({ onClose, onSaved, defaultFromAccountId }: Props) 
   const [fromAccountId, setFromAccountId] = useState<number>(defaultFromAccountId ?? 0);
   const [toAccountId, setToAccountId] = useState<number>(0);
   const [note, setNote] = useState('');
-  const [dateStr, setDateStr] = useState(new Date().toISOString().slice(0, 16));
+  const [dateStr, setDateStr] = useState(() => toLocalDateTimeInput(new Date()));
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [balances, setBalances] = useState<Map<number, number>>(new Map());

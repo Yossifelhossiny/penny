@@ -65,19 +65,30 @@ export function Dashboard({ onNavigate }: Props) {
   useEffect(() => {
     if (allTransactions === undefined) return;
 
-    getAllBalances().then(setBalances);
+    // When the month changes quickly, older requests can finish after newer
+    // ones; ignore their results so the screen always shows the chosen month.
+    let cancelled = false;
+    const keep = <T,>(set: (v: T) => void) => (v: T) => {
+      if (!cancelled) set(v);
+    };
 
-    getMonthlyTotals(year, month).then(({ income, expenses }) => {
+    getAllBalances().then(keep(setBalances));
+
+    getMonthlyTotals(year, month).then(keep(({ income, expenses }) => {
       setMonthlyIncome(income);
       setMonthlyExpenses(expenses);
-    });
+    }));
 
-    getRecentTransactions(5).then(setRecentTxns);
-    getCategorySpendingBreakdown(year, month).then(setCategorySpending);
-    getMonthlyTrend(6, year, month).then(setMonthlyTrend);
-    getFinancialHealthInsights(year, month).then(setHealthInsights);
-    getOverallBudgetProgress(year, month).then(setOverallBudget);
-    getActiveSpendingAlerts(year, month).then(setSpendingAlerts);
+    getRecentTransactions(5).then(keep(setRecentTxns));
+    getCategorySpendingBreakdown(year, month).then(keep(setCategorySpending));
+    getMonthlyTrend(6, year, month).then(keep(setMonthlyTrend));
+    getFinancialHealthInsights(year, month).then(keep(setHealthInsights));
+    getOverallBudgetProgress(year, month).then(keep(setOverallBudget));
+    getActiveSpendingAlerts(year, month).then(keep(setSpendingAlerts));
+
+    return () => {
+      cancelled = true;
+    };
   }, [allTransactions, allBudgets, year, month]);
 
   function handlePrevMonth() {
@@ -355,7 +366,11 @@ export function Dashboard({ onNavigate }: Props) {
                 </p>
               </div>
             </div>
-            <p className="font-semibold text-sm" style={{ color: account.color }}>
+            <p
+              className={`font-semibold text-sm ${
+                (balances.get(account.id!) ?? account.openingBalance) < 0 ? 'text-danger' : 'text-text'
+              }`}
+            >
               {formatEGP(balances.get(account.id!) ?? account.openingBalance)}
             </p>
           </div>

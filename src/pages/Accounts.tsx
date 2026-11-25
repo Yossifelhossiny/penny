@@ -118,7 +118,7 @@ export function Accounts() {
                     <div>
                       <p className="font-semibold text-sm text-text flex items-center gap-1.5">
                         <span>{account.name}</span>
-                        <span className="text-xs text-text-muted opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span className="text-xs text-text-muted [@media(hover:hover)]:opacity-0 group-hover:opacity-100 transition-opacity">
                           →
                         </span>
                       </p>

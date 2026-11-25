@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db';
 import { addIncome, addExpense, editTransaction } from '../../services/transactions';
-import { toPiastres } from '../../utils/format';
+import { toPiastres, toLocalDateTimeInput } from '../../utils/format';
 import type { TransactionType } from '../../types';
 
 interface Props {
@@ -37,8 +37,8 @@ export function AddTransactionForm({ onClose, onSaved, editingTransaction, defau
   const [note, setNote] = useState(editingTransaction?.note ?? '');
   const [dateStr, setDateStr] = useState(
     editingTransaction
-      ? editingTransaction.date.toISOString().slice(0, 16)
-      : new Date().toISOString().slice(0, 16)
+      ? toLocalDateTimeInput(editingTransaction.date)
+      : toLocalDateTimeInput(new Date())
   );
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);

@@ -93,7 +93,7 @@ export function TransactionList({ transactions, onEdit, onDelete, compact }: Pro
                 {amountPrefix}{formatEGP(txn.amount)}
               </p>
               {!compact && (
-                <div className="flex gap-2 mt-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex gap-2 mt-1 justify-end [@media(hover:hover)]:opacity-0 group-hover:opacity-100 transition-opacity">
                   {!isTransfer && (
                     <button
                       onClick={() => onEdit(txn)}

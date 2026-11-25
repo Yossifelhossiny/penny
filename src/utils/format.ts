@@ -56,3 +56,31 @@ export function getMonthRange(date: Date): { start: Date; end: Date } {
   const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
   return { start, end };
 }
+
+const pad2 = (n: number) => n.toString().padStart(2, '0');
+
+/**
+ * Format a Date as a local "YYYY-MM-DD" string (for <input type="date">,
+ * file names and CSV). Unlike toISOString(), this uses the device's time
+ * zone, so dates don't shift by the UTC offset (2–3 hours in Egypt).
+ */
+export function toLocalDateInput(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/**
+ * Format a Date as a local "YYYY-MM-DDTHH:mm" string for
+ * <input type="datetime-local">.
+ */
+export function toLocalDateTimeInput(d: Date): string {
+  return `${toLocalDateInput(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/**
+ * Parse a "YYYY-MM-DD" string from <input type="date"> as local midnight.
+ * (new Date("YYYY-MM-DD") would parse it as UTC midnight instead.)
+ */
+export function parseLocalDateInput(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}

@@ -266,7 +266,9 @@ export async function getActiveSpendingAlerts(
   const alerts: SpendingAlert[] = [];
 
   // Check overall budget alert
-  if (overallProgress && overallProgress.status !== 'safe') {
+  // Only warn about the overall budget when the user set a real ceiling;
+  // otherwise it just repeats the category alerts below.
+  if (overallProgress && overallProgress.isCustomOverall && overallProgress.status !== 'safe') {
     if (overallProgress.status === 'exceeded') {
       alerts.push({
         type: 'exceeded',

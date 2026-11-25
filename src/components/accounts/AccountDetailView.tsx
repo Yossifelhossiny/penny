@@ -304,7 +304,7 @@ export function AccountDetailView({
                     <p className={`font-semibold text-xs ${amountColor}`}>
                       {amountPrefix}{formatEGP(txn.amount)}
                     </p>
-                    <div className="flex gap-2 mt-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex gap-2 mt-1 justify-end [@media(hover:hover)]:opacity-0 group-hover:opacity-100 transition-opacity">
                       {!isTransfer && (
                         <button
                           type="button"
