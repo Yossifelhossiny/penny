@@ -68,6 +68,15 @@ export function parse(text: string): ParsedSMS {
     currency = 'EGP';
   }
 
+  // Pattern: currency before amount — "A debit of EGP 250.00", "credited with EGP 12,500.00"
+  if (!amountPiastres) {
+    const amountVerbCurFirst = normalized.match(/(?:خصم|إضافة|اضافة|سحب|debit|credit|withdraw)[^\d]*?(?:EGP|جم|جنيه|ج\.م)\s*([\d,]+\.?\d*)/i);
+    if (amountVerbCurFirst) {
+      amountPiastres = amountToPiastres(amountVerbCurFirst[1]);
+      currency = 'EGP';
+    }
+  }
+
   // Pattern: "بمبلغ 45.00 جم" (amount with currency after)
   if (!amountPiastres) {
     const amountAr = normalized.match(/بمبلغ\s*([\d,]+\.?\d*)\s*(?:جم|جنيه|EGP|ج\.م)/i);
@@ -101,7 +110,7 @@ export function parse(text: string): ParsedSMS {
   // Extract merchant
   let merchant: string | null = null;
   // Arabic: "عند MERCHANT" or "لدى MERCHANT"
-  const merchantAr = text.match(/(?:عند|لدى|at)\s+(.+?)(?:\s+يوم|\s+بتاريخ|\s+في|\s*$)/i);
+  const merchantAr = text.match(/(?:عند|لدى|\bat\b)\s+(.+?)(?:\s+يوم|\s+بتاريخ|\s+في|\s+on\s|\.\s|\s*$)/i);
   if (merchantAr) {
     merchant = merchantAr[1].trim();
     // Clean trailing whitespace and common suffixes

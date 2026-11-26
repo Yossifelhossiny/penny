@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { Account, Transaction, Category, Budget, SavingsGoal } from '../types';
+import type { Account, Transaction, Category, Budget, SavingsGoal, SmsInboxEntry } from '../types';
 
 const db = new Dexie('PennyDB') as Dexie & {
   accounts: EntityTable<Account, 'id'>;
@@ -7,7 +7,18 @@ const db = new Dexie('PennyDB') as Dexie & {
   categories: EntityTable<Category, 'id'>;
   budgets: EntityTable<Budget, 'id'>;
   goals: EntityTable<SavingsGoal, 'id'>;
+  smsInbox: EntityTable<SmsInboxEntry, 'id'>;
 };
+
+// v4 -> v5: add smsInbox (iOS Shortcut auto-import log + pending queue)
+db.version(5).stores({
+  accounts: '++id, name, type',
+  transactions: '++id, type, categoryId, accountId, toAccountId, date, smsFingerprint, referenceId',
+  categories: '++id, name, type',
+  budgets: '++id, categoryId, monthKey',
+  goals: '++id, name, targetDate',
+  smsInbox: '++id, &entryKey, status, receivedAt',
+});
 
 // v3 -> v4: add budgets and goals tables
 db.version(4).stores({

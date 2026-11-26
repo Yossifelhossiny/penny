@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
-import type { Page } from '../types';
+import type { Page, SmsInboxEntry } from '../types';
 import {
   splitSmsMessages,
   processSmsBatch,
@@ -10,6 +10,8 @@ import {
   type SmsReviewItem,
 } from '../services/sms/smsImportService';
 import { SmsReviewCard } from '../components/sms/SmsReviewCard';
+import { SmsInboxSync } from '../components/sms/SmsInboxSync';
+import { reviewItemsForEntry, markInboxEntryResolved } from '../services/sms/smsInboxService';
 import { formatEGP } from '../utils/format';
 
 interface Props {
@@ -48,6 +50,23 @@ export function SmsImport({ onNavigate }: Props) {
     feeCount: number;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+  /** Set while reviewing a pending SMS from the iPhone inbox. */
+  const [reviewingInboxId, setReviewingInboxId] = useState<number | null>(null);
+
+  async function handleReviewInboxEntry(entry: SmsInboxEntry) {
+    setErrorMessage('');
+    try {
+      const items = await reviewItemsForEntry(entry);
+      if (items.length === 0) {
+        setErrorMessage('This SMS could not be turned into a transaction.');
+        return;
+      }
+      setReviewItems(items);
+      setReviewingInboxId(entry.id ?? null);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Could not open this SMS');
+    }
+  }
 
   const accounts = useLiveQuery(() => db.accounts.toArray()) ?? [];
   const categories = useLiveQuery(() => db.categories.toArray()) ?? [];
@@ -148,6 +167,10 @@ export function SmsImport({ onNavigate }: Props) {
       }
 
       if (result.savedCount > 0 || result.feeCount > 0) {
+        if (reviewingInboxId !== null) {
+          await markInboxEntryResolved(reviewingInboxId, result.transactionIds);
+          setReviewingInboxId(null);
+        }
         setSaveSuccess({
           savedCount: result.savedCount,
           feeCount: result.feeCount,
@@ -164,6 +187,7 @@ export function SmsImport({ onNavigate }: Props) {
 
   // Reset import screen
   function handleReset() {
+    setReviewingInboxId(null);
     setReviewItems([]);
     setRawText('');
     setSaveSuccess(null);
@@ -259,6 +283,9 @@ export function SmsImport({ onNavigate }: Props) {
       {/* Input Stage (when no items are currently being reviewed) */}
       {reviewItems.length === 0 && !saveSuccess && (
         <div className="space-y-4">
+          {/* iPhone Shortcut inbox */}
+          <SmsInboxSync onReview={handleReviewInboxEntry} />
+
           {/* Paste Card */}
           <div className="bg-surface rounded-2xl p-4 space-y-3 border border-white/5">
             <div className="flex items-center justify-between">

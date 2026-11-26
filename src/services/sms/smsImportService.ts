@@ -135,9 +135,28 @@ export function resolveDateWithYear(rawDateStr: string, fallbackYear: number): D
 /**
  * Check if a parsed SMS matches any transaction already saved in the database.
  */
+export interface DbDuplicateResult {
+  isDuplicate: boolean;
+  reason?: string;
+  existingTxnId?: number;
+  /**
+   * 'strong' = same reference ID, or same fingerprint that includes a date+time
+   * or reference (safe to ignore automatically).
+   * 'weak' = only same amount on the same day, or a fingerprint without a
+   * date/time (could be a genuine second transaction — needs a human).
+   */
+  strength?: 'strong' | 'weak';
+}
+
+/** True when a fingerprint is specific enough to identify one transaction. */
+export function isStrongFingerprint(parsed: ParsedSMS): boolean {
+  if (parsed.referenceId) return true;
+  return !!parsed.date && /\d{1,2}:\d{2}/.test(parsed.date.raw);
+}
+
 export async function checkDatabaseDuplicate(
   parsed: ParsedSMS
-): Promise<{ isDuplicate: boolean; reason?: string; existingTxnId?: number }> {
+): Promise<DbDuplicateResult> {
   // 1. Check by reference ID
   if (parsed.referenceId) {
     const byRef = await db.transactions
@@ -150,6 +169,7 @@ export async function checkDatabaseDuplicate(
         isDuplicate: true,
         reason: `Matches existing transaction with Reference ID: ${parsed.referenceId}`,
         existingTxnId: byRef.id,
+        strength: 'strong',
       };
     }
 
@@ -163,6 +183,7 @@ export async function checkDatabaseDuplicate(
         isDuplicate: true,
         reason: `Reference ID ${parsed.referenceId} found in transaction history`,
         existingTxnId: byNote.id,
+        strength: 'strong',
       };
     }
   }
@@ -179,6 +200,7 @@ export async function checkDatabaseDuplicate(
         isDuplicate: true,
         reason: 'Identical SMS has already been imported',
         existingTxnId: byFp.id,
+        strength: isStrongFingerprint(parsed) ? 'strong' : 'weak',
       };
     }
   }
@@ -189,10 +211,24 @@ export async function checkDatabaseDuplicate(
     const startOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 0, 0, 0);
     const endOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 23, 59, 59, 999);
 
+    const parsedIsStrong = isStrongFingerprint(parsed);
     const matches = await db.transactions
       .where('date')
       .between(startOfDay, endOfDay, true, true)
-      .filter(t => t.amount === parsed.amountPiastres)
+      .filter(t => {
+        if (t.amount !== parsed.amountPiastres) return false;
+        // Provably different transactions are not duplicates:
+        // different reference IDs…
+        if (parsed.referenceId && t.referenceId && t.referenceId !== parsed.referenceId) return false;
+        // …or two precise SMS fingerprints (with reference or exact time) that differ.
+        if (
+          parsedIsStrong &&
+          t.smsFingerprint &&
+          t.smsFingerprint !== parsed.fingerprint &&
+          (t.smsFingerprint.includes(':ref:') || /\d{1,2}:\d{2}/.test(t.smsFingerprint))
+        ) return false;
+        return true;
+      })
       .toArray();
 
     if (matches.length > 0) {
@@ -200,6 +236,7 @@ export async function checkDatabaseDuplicate(
         isDuplicate: true,
         reason: `Potential duplicate: Same amount (${(parsed.amountPiastres / 100).toFixed(2)} EGP) on ${targetDate.toLocaleDateString()}`,
         existingTxnId: matches[0].id,
+        strength: 'weak',
       };
     }
   }
@@ -216,7 +253,13 @@ export function createReviewItem(
   categories: Category[],
   index: number,
   batchDupeIndices: Set<number>,
-  dbDupe: { isDuplicate: boolean; reason?: string }
+  dbDupe: { isDuplicate: boolean; reason?: string },
+  /**
+   * When the SMS was actually received (from the iOS Shortcut). Used to fill
+   * in a missing year and as the time for SMS that carry no date at all.
+   * Defaults to now (manual paste).
+   */
+  referenceDate: Date = new Date()
 ): SmsReviewItem {
   // Find accounts
   const bankAccount = accounts.find(a => a.type === 'bank') ?? accounts[0];
@@ -239,6 +282,15 @@ export function createReviewItem(
     // ATM withdrawals are transfers from Bank to Cash Wallet
     action = 'transfer';
     defaultAccount = bankAccount;
+    toAccountId = cashAccount?.id;
+  } else if (parsed.transactionType === 'wallet_deposit') {
+    // Cash handed in at a store/agent: Cash Wallet → wallet account
+    action = 'transfer';
+    toAccountId = defaultAccount?.id;
+    defaultAccount = cashAccount;
+  } else if (parsed.transactionType === 'wallet_withdrawal') {
+    // Cash taken out of the wallet: wallet account → Cash Wallet
+    action = 'transfer';
     toAccountId = cashAccount?.id;
   } else if (parsed.direction === 'inbound' || parsed.transactionType === 'income' || parsed.transactionType === 'transfer_in') {
     action = 'income';
@@ -288,7 +340,7 @@ export function createReviewItem(
   const feeCategoryId = (billsCat ?? transferCat ?? otherCat ?? expenseCats[0])?.id;
 
   // Date handling
-  const now = new Date();
+  const now = referenceDate;
   let dateStr = toInputDateTime(now);
   let dateUnresolved = false;
   let dateWarning: string | undefined = undefined;
@@ -370,7 +422,8 @@ export function createReviewItem(
 export async function processSmsBatch(
   rawText: string,
   accounts: Account[],
-  categories: Category[]
+  categories: Category[],
+  referenceDate?: Date
 ): Promise<SmsReviewItem[]> {
   const messages = splitSmsMessages(rawText);
   if (messages.length === 0) return [];
@@ -386,7 +439,7 @@ export async function processSmsBatch(
   for (let i = 0; i < parsedBatch.length; i++) {
     const parsed = parsedBatch[i];
     const dbDupe = await checkDatabaseDuplicate(parsed);
-    items.push(createReviewItem(parsed, accounts, categories, i, batchDupeIndices, dbDupe));
+    items.push(createReviewItem(parsed, accounts, categories, i, batchDupeIndices, dbDupe, referenceDate));
   }
 
   return items;
@@ -452,11 +505,14 @@ export async function saveConfirmedReviewItems(
   savedCount: number;
   feeCount: number;
   errors: string[];
+  /** IDs of every transaction created, in order (main, then fee). */
+  transactionIds: number[];
 }> {
   const selectedItems = items.filter(it => it.selected && it.action !== 'ignore' && !it.isBalanceOnly);
   let savedCount = 0;
   let feeCount = 0;
   const errors: string[] = [];
+  const transactionIds: number[] = [];
 
   for (const item of selectedItems) {
     const valError = validateReviewItem(item);
@@ -473,7 +529,7 @@ export async function saveConfirmedReviewItems(
       const referenceId = item.parsed.referenceId || undefined;
 
       if (item.action === 'income') {
-        await addIncome({
+        transactionIds.push(await addIncome({
           amount: amountPiastres,
           accountId: item.accountId,
           categoryId: item.categoryId!,
@@ -483,10 +539,10 @@ export async function saveConfirmedReviewItems(
           originalSms,
           smsFingerprint,
           referenceId,
-        });
+        }));
         savedCount++;
       } else if (item.action === 'expense') {
-        await addExpense({
+        transactionIds.push(await addExpense({
           amount: amountPiastres,
           accountId: item.accountId,
           categoryId: item.categoryId!,
@@ -496,10 +552,10 @@ export async function saveConfirmedReviewItems(
           originalSms,
           smsFingerprint,
           referenceId,
-        });
+        }));
         savedCount++;
       } else if (item.action === 'transfer') {
-        await addTransfer({
+        transactionIds.push(await addTransfer({
           amount: amountPiastres,
           fromAccountId: item.accountId,
           toAccountId: item.toAccountId!,
@@ -508,7 +564,7 @@ export async function saveConfirmedReviewItems(
           originalSms,
           smsFingerprint,
           referenceId,
-        });
+        }));
         savedCount++;
       }
 
@@ -516,7 +572,7 @@ export async function saveConfirmedReviewItems(
       if (item.hasFee && item.includeFeeAsExpense) {
         const feePiastres = Math.round(parseFloat(item.feeEgp) * 100);
         if (feePiastres > 0) {
-          await addExpense({
+          transactionIds.push(await addExpense({
             amount: feePiastres,
             accountId: item.accountId,
             categoryId: item.feeCategoryId ?? item.categoryId!,
@@ -525,7 +581,7 @@ export async function saveConfirmedReviewItems(
             originalSms: `[Fee] ${originalSms}`,
             smsFingerprint: `${smsFingerprint}:fee`,
             referenceId: referenceId ? `${referenceId}-fee` : undefined,
-          });
+          }));
           feeCount++;
         }
       }
@@ -534,5 +590,5 @@ export async function saveConfirmedReviewItems(
     }
   }
 
-  return { savedCount, feeCount, errors };
+  return { savedCount, feeCount, errors, transactionIds };
 }

@@ -22,6 +22,10 @@ export type SmsTransactionType =
   | 'atm_withdrawal'
   | 'card_purchase'
   | 'mobile_recharge'
+  /** Cash deposited into a wallet at an agent/store (cash → wallet). */
+  | 'wallet_deposit'
+  /** Cash withdrawn from a wallet at an agent/ATM (wallet → cash). */
+  | 'wallet_withdrawal'
   | 'fee'
   | 'balance_only'
   | 'unknown';

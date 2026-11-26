@@ -66,4 +66,34 @@ export interface SavingsGoal {
   createdAt: Date;
 }
 
+/**
+ * What happened to one SMS that arrived through the iOS Shortcut inbox.
+ * - saved: valid & confident → transactions created automatically
+ * - pending: financial but ambiguous/incomplete → waiting for review
+ * - duplicate: already recorded (same reference / same SMS) → ignored
+ * - ignored: not a supported financial transaction (OTP, promo, balance info…)
+ * - resolved: a pending item the user reviewed and saved by hand
+ * - dismissed: a pending item the user chose to discard
+ */
+export type SmsInboxStatus = 'saved' | 'pending' | 'duplicate' | 'ignored' | 'resolved' | 'dismissed';
+
+export interface SmsInboxEntry {
+  id?: number;
+  /** Stable hash of (received time + SMS text). Makes re-syncing idempotent. */
+  entryKey: string;
+  /** When the iPhone received the SMS (from the Shortcut), if known. */
+  receivedAt: Date | null;
+  /** Sender name/number as given by iOS, if known. */
+  sender: string | null;
+  /** The original SMS text, verbatim. */
+  text: string;
+  status: SmsInboxStatus;
+  /** Human-readable reason for the status. */
+  reason: string;
+  /** Transactions created from this SMS (main + fee). */
+  transactionIds: number[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export type Page = 'dashboard' | 'transactions' | 'accounts' | 'settings' | 'import' | 'budgets' | 'reports';

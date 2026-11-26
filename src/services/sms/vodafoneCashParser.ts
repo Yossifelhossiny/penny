@@ -19,6 +19,8 @@ import { amountToPiastres, normalizeArabicNumerals, parseSmsDate, buildFingerpri
 export function canParse(text: string): boolean {
   const normalized = normalizeArabicNumerals(text);
   if (/vodafone\s*cash|فودافون\s*كاش/i.test(normalized)) return true;
+  // Wallet cash-in / cash-out with a Vodafone-style transaction ID
+  if (/(?:إيداع|ايداع|سحب|deposited|withdrawn)/i.test(text) && /محفظ|wallet/i.test(text) && /\b01\d{10}\b/.test(normalized)) return true;
   // Vodafone Cash transaction ID pattern (long numeric)
   if (/\b01\d{10}\b/.test(normalized) && /تم تحويل|تم استلام|شحن|recharge|transfer/i.test(text)) return true;
   // Specific Vodafone patterns
@@ -45,8 +47,18 @@ export function parse(text: string): ParsedSMS {
 
   // === Determine type ===
 
+  // Cash deposit into the wallet (at a store/agent)
+  if (/تم\s*(?:إيداع|ايداع)|you\s+have\s+deposited|deposited\s+to\s+your/i.test(text)) {
+    transactionType = 'wallet_deposit';
+    direction = 'inbound';
+  }
+  // Cash withdrawal from the wallet (at a store/agent/ATM)
+  else if (/تم\s*سحب|you\s+have\s+withdrawn|withdrawn\s+from\s+your/i.test(text)) {
+    transactionType = 'wallet_withdrawal';
+    direction = 'outbound';
+  }
   // Recharge
-  if (/شحن|recharge/i.test(text)) {
+  else if (/شحن|recharge/i.test(text)) {
     transactionType = 'mobile_recharge';
     direction = 'outbound';
   }
