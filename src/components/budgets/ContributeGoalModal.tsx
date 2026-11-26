@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { GoalProgress } from '../../services/budgets';
 import { contributeToSavingsGoal } from '../../services/budgets';
 import { formatEGP, toPiastres } from '../../utils/format';
+import { AmountInput, Banner, Button, ProgressBar, Sheet } from '../ui';
 
 interface Props {
   goal: GoalProgress;
@@ -10,123 +11,53 @@ interface Props {
 }
 
 export function ContributeGoalModal({ goal, onClose, onContributed }: Props) {
-  const [amountEgpStr, setAmountEgpStr] = useState('');
+  const [amountStr, setAmountStr] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const amountEgp = parseFloat(amountEgpStr) || 0;
-  const addedPiastres = toPiastres(amountEgp);
-  const newTotalPiastres = goal.currentAmountPiastres + addedPiastres;
-  const newPercentage = goal.targetAmountPiastres > 0
-    ? Math.min(100, Math.round((newTotalPiastres / goal.targetAmountPiastres) * 100))
-    : 0;
+  const amount = parseFloat(amountStr) || 0;
+  const added = toPiastres(amount);
+  const newTotal = goal.currentAmountPiastres + added;
+  const newPct = goal.targetAmountPiastres > 0 ? Math.min(100, Math.round((newTotal / goal.targetAmountPiastres) * 100)) : 0;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-
-    if (amountEgp <= 0) {
-      setError('Enter a valid positive amount');
-      return;
-    }
-
+    if (amount <= 0) return setError('Enter an amount greater than zero');
     setSaving(true);
     try {
-      await contributeToSavingsGoal(goal.id, addedPiastres);
+      await contributeToSavingsGoal(goal.id, added);
       onContributed();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add funds');
+      setError(err instanceof Error ? err.message : 'Could not add to the goal');
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-surface w-full max-w-sm rounded-t-2xl sm:rounded-2xl border border-white/10 pb-[env(safe-area-inset-bottom)]">
-        {/* Header */}
-        <div className="px-4 pt-4 pb-3 border-b border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">{goal.icon}</span>
-            <div>
-              <h2 className="text-sm font-semibold">Add to Savings</h2>
-              <p className="text-xs text-text-muted">{goal.name}</p>
-            </div>
+    <Sheet
+      title={`Add to ${goal.name}`}
+      onClose={onClose}
+      footer={
+        <Button type="submit" form="contribute-form" size="lg" block loading={saving} disabled={amount <= 0}>
+          Add {amount > 0 ? formatEGP(added) : ''}
+        </Button>
+      }
+    >
+      <form id="contribute-form" onSubmit={handleSubmit} className="space-y-4">
+        <AmountInput value={amountStr} onChange={(e) => setAmountStr(e.target.value)} aria-label="Amount to add" autoFocus />
+        <div className="rounded-2xl bg-well/70 p-4 space-y-2.5">
+          <div className="flex justify-between text-sm">
+            <span className="text-ink-3">{amount > 0 ? 'After this' : 'Saved so far'}</span>
+            <span className="num font-semibold text-ink">{formatEGP(amount > 0 ? newTotal : goal.currentAmountPiastres)} <span className="text-ink-3 font-medium">of {formatEGP(goal.targetAmountPiastres)}</span></span>
           </div>
-          <button
-            onClick={onClose}
-            className="text-text-muted hover:text-text text-2xl leading-none p-1 cursor-pointer"
-          >
-            ×
-          </button>
+          <ProgressBar value={amount > 0 ? newPct : goal.percentage} tone="brand" />
         </div>
-
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
-          {error && (
-            <div className="bg-danger/10 border border-danger/30 text-danger text-xs rounded-xl p-3">
-              {error}
-            </div>
-          )}
-
-          {/* Current progress snapshot */}
-          <div className="bg-background rounded-xl p-3 border border-white/5 space-y-1.5 text-xs">
-            <div className="flex items-center justify-between text-text-muted">
-              <span>Current Progress:</span>
-              <span className="font-semibold text-text">
-                {formatEGP(goal.currentAmountPiastres)} of {formatEGP(goal.targetAmountPiastres)} ({goal.percentage}%)
-              </span>
-            </div>
-            {amountEgp > 0 && (
-              <div className="flex items-center justify-between text-success pt-1 border-t border-white/5 font-semibold">
-                <span>New Total:</span>
-                <span>
-                  {formatEGP(newTotalPiastres)} ({newPercentage}%)
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Amount input */}
-          <div>
-            <label className="text-xs text-text-muted block mb-1">Contribution Amount (EGP)</label>
-            <div className="relative">
-              <input
-                type="number"
-                step="1"
-                min="1"
-                value={amountEgpStr}
-                onChange={(e) => setAmountEgpStr(e.target.value)}
-                placeholder="e.g. 500"
-                className="w-full bg-background border border-white/10 rounded-xl px-3 py-2 text-base font-bold text-primary focus:ring-1 focus:ring-primary focus:outline-none"
-                autoFocus
-              />
-              <span className="absolute right-3 top-2.5 text-xs text-text-muted font-medium">
-                EGP
-              </span>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="pt-2 flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-xs bg-surface-light text-text-muted hover:text-text font-medium py-2 px-4 rounded-xl transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving || amountEgp <= 0}
-              className="text-xs bg-primary text-white font-medium py-2 px-5 rounded-xl hover:bg-primary-dark transition-colors cursor-pointer disabled:opacity-40"
-            >
-              {saving ? 'Adding...' : 'Confirm Contribution'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <p className="text-[13px] text-ink-3 px-0.5">This tracks progress only — it doesn’t move money between accounts.</p>
+        {error && <Banner tone="error">{error}</Banner>}
+      </form>
+    </Sheet>
   );
 }

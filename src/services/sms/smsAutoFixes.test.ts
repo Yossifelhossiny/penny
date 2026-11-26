@@ -40,7 +40,8 @@ describe('date fixes', () => {
     expect(resolveYearlessDate('11-26 14:59', arrived)).toEqual(new Date(2026, 10, 26, 14, 59));
     // New Year: SMS from 31 Dec arriving on 1 Jan belongs to last year
     expect(resolveYearlessDate('31/12 23:50', new Date(2027, 0, 1, 0, 5))).toEqual(new Date(2026, 11, 31, 23, 50));
-    // Ambiguous 03-04 picks whichever reading is closer to arrival
+    // Ambiguous dates are always day-month — never swapped just because it's closer
+    expect(resolveYearlessDate('09/05 17:09', arrived)).toEqual(new Date(2026, 4, 9, 17, 9));
     expect(resolveYearlessDate('03-04', new Date(2026, 3, 3, 15))).toEqual(new Date(2026, 3, 3, 12, 0));
     expect(resolveYearlessDate('99-99', arrived)).toBeNull();
   });

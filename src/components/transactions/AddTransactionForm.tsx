@@ -1,264 +1,319 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { ArrowDown, Check } from 'lucide-react';
 import { db } from '../../db';
-import { addIncome, addExpense, editTransaction } from '../../services/transactions';
-import { toPiastres, toLocalDateTimeInput } from '../../utils/format';
+import { addIncome, addExpense, addTransfer, editTransaction, getAllBalances } from '../../services/transactions';
+import { toPiastres, toLocalDateTimeInput, formatEGP } from '../../utils/format';
 import type { TransactionType } from '../../types';
+import { AmountInput, Banner, Button, CategoryIcon, Field, Segmented, Select, Sheet, TextInput, cx } from '../ui';
+
+export type EntryMode = 'expense' | 'income' | 'transfer';
+
+interface EditingTransaction {
+  id: number;
+  amount: number; // piastres
+  type: TransactionType;
+  accountId: number;
+  categoryId?: number;
+  merchant?: string;
+  note?: string;
+  date: Date;
+}
 
 interface Props {
   onClose: () => void;
   onSaved: () => void;
-  editingTransaction?: {
-    id: number;
-    amount: number; // piastres
-    type: TransactionType;
-    accountId: number;
-    categoryId?: number;
-    merchant?: string;
-    note?: string;
-    date: Date;
-  };
+  editingTransaction?: EditingTransaction;
   defaultAccountId?: number;
+  /** Which tab to open on (new entries only). */
+  initialMode?: EntryMode;
 }
 
-export function AddTransactionForm({ onClose, onSaved, editingTransaction, defaultAccountId }: Props) {
+/**
+ * One sheet for every way money moves: expense, income or transfer.
+ * When editing, the type is fixed and only the matching form is shown.
+ */
+export function AddTransactionForm({ onClose, onSaved, editingTransaction, defaultAccountId, initialMode = 'expense' }: Props) {
   const isEditing = !!editingTransaction;
-  const [type, setType] = useState<'income' | 'expense'>(
-    editingTransaction?.type === 'income' ? 'income' : 'expense'
+  const [mode, setMode] = useState<EntryMode>(
+    editingTransaction ? (editingTransaction.type === 'income' ? 'income' : 'expense') : initialMode
   );
-  const [amountStr, setAmountStr] = useState(
-    editingTransaction ? (editingTransaction.amount / 100).toString() : ''
-  );
-  const [accountId, setAccountId] = useState<number>(
-    editingTransaction?.accountId ?? defaultAccountId ?? 0
-  );
-  const [categoryId, setCategoryId] = useState<number>(editingTransaction?.categoryId ?? 0);
-  const [merchant, setMerchant] = useState(editingTransaction?.merchant ?? '');
-  const [note, setNote] = useState(editingTransaction?.note ?? '');
-  const [dateStr, setDateStr] = useState(
-    editingTransaction
-      ? toLocalDateTimeInput(editingTransaction.date)
-      : toLocalDateTimeInput(new Date())
-  );
-  const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const formId = 'txn-form';
+  const done = () => {
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <Sheet
+      title={isEditing ? 'Edit transaction' : 'New transaction'}
+      onClose={onClose}
+      footer={
+        <Button type="submit" form={formId} size="lg" block loading={saving}>
+          {isEditing ? 'Save changes' : mode === 'transfer' ? 'Transfer' : mode === 'income' ? 'Add income' : 'Add expense'}
+        </Button>
+      }
+    >
+      {!isEditing && (
+        <Segmented
+          label="Transaction type"
+          className="mb-1"
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: 'expense', label: 'Expense' },
+            { value: 'income', label: 'Income' },
+            { value: 'transfer', label: 'Transfer' },
+          ]}
+        />
+      )}
+      {mode === 'transfer' ? (
+        <TransferFields formId={formId} onDone={done} onSaving={setSaving} defaultFromAccountId={defaultAccountId} />
+      ) : (
+        <IncomeExpenseFields
+          key={mode}
+          formId={formId}
+          type={mode}
+          editing={editingTransaction}
+          defaultAccountId={defaultAccountId}
+          onDone={done}
+          onSaving={setSaving}
+        />
+      )}
+    </Sheet>
+  );
+}
+
+/** Kept for existing callers: opens the sheet on the Transfer tab. */
+export function TransferForm({ onClose, onSaved, defaultFromAccountId }: { onClose: () => void; onSaved: () => void; defaultFromAccountId?: number }) {
+  return <AddTransactionForm onClose={onClose} onSaved={onSaved} defaultAccountId={defaultFromAccountId} initialMode="transfer" />;
+}
+
+function IncomeExpenseFields({
+  formId,
+  type,
+  editing,
+  defaultAccountId,
+  onDone,
+  onSaving,
+}: {
+  formId: string;
+  type: 'income' | 'expense';
+  editing?: EditingTransaction;
+  defaultAccountId?: number;
+  onDone: () => void;
+  onSaving: (v: boolean) => void;
+}) {
+  const [amountStr, setAmountStr] = useState(editing ? (editing.amount / 100).toString() : '');
+  const [accountId, setAccountId] = useState<number>(editing?.accountId ?? defaultAccountId ?? 0);
+  const [categoryId, setCategoryId] = useState<number>(editing?.categoryId ?? 0);
+  const [merchant, setMerchant] = useState(editing?.merchant ?? '');
+  const [note, setNote] = useState(editing?.note ?? '');
+  const [dateStr, setDateStr] = useState(toLocalDateTimeInput(editing?.date ?? new Date()));
+  const [error, setError] = useState('');
 
   const accounts = useLiveQuery(() => db.accounts.toArray());
-  const categories = useLiveQuery(() =>
-    db.categories.where('type').equals(type).toArray()
-  , [type]);
+  const categories = useLiveQuery(() => db.categories.where('type').equals(type).toArray(), [type]);
 
-  // Set default account on first load
-  if (accountId === 0 && accounts && accounts.length > 0 && !editingTransaction) {
+  // Default to the first account once accounts load.
+  if (accountId === 0 && accounts && accounts.length > 0 && !editing) {
     setAccountId(accounts[0].id!);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    setSaving(true);
-
+    onSaving(true);
     try {
       const amount = parseFloat(amountStr);
-      if (isNaN(amount) || amount <= 0) {
-        throw new Error('Enter a valid positive amount');
-      }
+      if (isNaN(amount) || amount <= 0) throw new Error('Enter an amount greater than zero');
+      if (!accountId) throw new Error('Choose an account');
+      if (!categoryId) throw new Error('Choose a category');
 
-      const piastres = toPiastres(amount);
-      const date = new Date(dateStr);
+      const payload = {
+        amount: toPiastres(amount),
+        accountId,
+        categoryId,
+        merchant: merchant.trim() || undefined,
+        note: note.trim() || undefined,
+        date: new Date(dateStr),
+      };
 
-      if (!accountId) throw new Error('Select an account');
-      if (!categoryId) throw new Error('Select a category');
-
-      if (isEditing) {
-        await editTransaction(editingTransaction!.id, {
-          amount: piastres,
-          type,
-          accountId,
-          categoryId,
-          merchant: merchant || undefined,
-          note: note || undefined,
-          date,
-        });
-      } else {
-        const input = {
-          amount: piastres,
-          accountId,
-          categoryId,
-          merchant: merchant || undefined,
-          note: note || undefined,
-          date,
-        };
-
-        if (type === 'income') {
-          await addIncome(input);
-        } else {
-          await addExpense(input);
-        }
-      }
-
-      onSaved();
-      onClose();
+      if (editing) await editTransaction(editing.id, { ...payload, type });
+      else if (type === 'income') await addIncome(payload);
+      else await addExpense(payload);
+      onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(err instanceof Error ? err.message : 'Could not save');
     } finally {
-      setSaving(false);
+      onSaving(false);
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-end justify-center">
-      <div className="bg-surface w-full max-w-lg rounded-t-2xl max-h-[90dvh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
-        <div className="sticky top-0 bg-surface/95 backdrop-blur-md px-4 pt-4 pb-2 border-b border-white/5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">
-              {isEditing ? 'Edit Transaction' : 'Add Transaction'}
-            </h2>
-            <button onClick={onClose} className="text-text-muted text-2xl leading-none p-1">×</button>
-          </div>
+    <form id={formId} onSubmit={handleSubmit} className="space-y-5">
+      <AmountInput
+        tone={type === 'income' ? 'income' : 'expense'}
+        value={amountStr}
+        onChange={(e) => setAmountStr(e.target.value)}
+        aria-label="Amount in EGP"
+        autoFocus={!editing}
+        required
+      />
+
+      <Field label="Category">
+        <div className="grid grid-cols-4 gap-1.5">
+          {categories?.map((cat) => {
+            const active = categoryId === cat.id;
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setCategoryId(cat.id!)}
+                aria-pressed={active}
+                className={cx(
+                  'relative flex flex-col items-center gap-1.5 rounded-2xl px-1 py-2.5 transition-colors',
+                  active ? 'bg-brand-50 ring-2 ring-brand-500' : 'hover:bg-well'
+                )}
+              >
+                <CategoryIcon category={cat} size="sm" />
+                <span className={cx('text-[11px] leading-tight text-center line-clamp-2', active ? 'text-brand-800 font-semibold' : 'text-ink-2 font-medium')}>
+                  {cat.name}
+                </span>
+                {active && (
+                  <span className="absolute top-1.5 right-1.5 size-4 rounded-full bg-brand-500 text-white flex items-center justify-center">
+                    <Check className="size-2.5" strokeWidth={3} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
+      </Field>
 
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
-          {/* Type Toggle */}
-          {!isEditing && (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setType('expense')}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                  type === 'expense'
-                    ? 'bg-danger text-white'
-                    : 'bg-surface-light text-text-muted'
-                }`}
-              >
-                Expense
-              </button>
-              <button
-                type="button"
-                onClick={() => setType('income')}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                  type === 'income'
-                    ? 'bg-success text-white'
-                    : 'bg-surface-light text-text-muted'
-                }`}
-              >
-                Income
-              </button>
-            </div>
-          )}
+      <Field label="Account">
+        <Select value={accountId} onChange={(e) => setAccountId(Number(e.target.value))} required>
+          <option value={0} disabled>Choose</option>
+          {accounts?.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </Select>
+      </Field>
 
-          {/* Amount */}
-          <div>
-            <label className="text-xs text-text-muted block mb-1">Amount (EGP)</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.01"
-              min="0.01"
-              value={amountStr}
-              onChange={(e) => setAmountStr(e.target.value)}
-              placeholder="0.00"
-              className="w-full bg-surface-light rounded-xl px-4 py-3 text-lg font-semibold
-                text-text placeholder:text-text-muted/50 outline-none focus:ring-2 focus:ring-primary/50"
-              required
-              autoFocus
-            />
-          </div>
+      <Field label="Date and time">
+        <TextInput type="datetime-local" value={dateStr} onChange={(e) => setDateStr(e.target.value)} required />
+      </Field>
 
-          {/* Account */}
-          <div>
-            <label className="text-xs text-text-muted block mb-1">Account</label>
-            <select
-              value={accountId}
-              onChange={(e) => setAccountId(Number(e.target.value))}
-              className="w-full bg-surface-light rounded-xl px-4 py-3 text-sm
-                text-text outline-none focus:ring-2 focus:ring-primary/50 appearance-none"
-              required
-            >
-              <option value={0} disabled>Select account</option>
-              {accounts?.map((a) => (
-                <option key={a.id} value={a.id}>{a.icon} {a.name}</option>
-              ))}
-            </select>
-          </div>
+      <Field label={type === 'income' ? 'From' : 'Paid to'}>
+        <TextInput
+          value={merchant}
+          onChange={(e) => setMerchant(e.target.value)}
+          placeholder={type === 'income' ? 'e.g. Upwork' : 'e.g. Carrefour'}
+          autoComplete="off"
+        />
+      </Field>
 
-          {/* Category */}
-          <div>
-            <label className="text-xs text-text-muted block mb-1">Category</label>
-            <div className="grid grid-cols-3 gap-2">
-              {categories?.map((cat) => (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setCategoryId(cat.id!)}
-                  className={`flex flex-col items-center gap-1 p-3 rounded-xl text-xs transition-colors ${
-                    categoryId === cat.id
-                      ? 'bg-primary/20 ring-2 ring-primary text-primary'
-                      : 'bg-surface-light text-text-muted'
-                  }`}
-                >
-                  <span className="text-lg">{cat.icon}</span>
-                  <span className="truncate w-full text-center">{cat.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+      <Field label="Note">
+        <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" autoComplete="off" />
+      </Field>
 
-          {/* Merchant */}
-          <div>
-            <label className="text-xs text-text-muted block mb-1">
-              {type === 'income' ? 'Source' : 'Merchant'} (optional)
-            </label>
-            <input
-              type="text"
-              value={merchant}
-              onChange={(e) => setMerchant(e.target.value)}
-              placeholder={type === 'income' ? 'e.g., Upwork' : 'e.g., Carrefour'}
-              className="w-full bg-surface-light rounded-xl px-4 py-3 text-sm
-                text-text placeholder:text-text-muted/50 outline-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>
+      {error && <Banner tone="error">{error}</Banner>}
+    </form>
+  );
+}
 
-          {/* Note */}
-          <div>
-            <label className="text-xs text-text-muted block mb-1">Note (optional)</label>
-            <input
-              type="text"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Add a note..."
-              className="w-full bg-surface-light rounded-xl px-4 py-3 text-sm
-                text-text placeholder:text-text-muted/50 outline-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>
+function TransferFields({
+  formId,
+  defaultFromAccountId,
+  onDone,
+  onSaving,
+}: {
+  formId: string;
+  defaultFromAccountId?: number;
+  onDone: () => void;
+  onSaving: (v: boolean) => void;
+}) {
+  const [amountStr, setAmountStr] = useState('');
+  const [fromAccountId, setFromAccountId] = useState<number>(defaultFromAccountId ?? 0);
+  const [toAccountId, setToAccountId] = useState<number>(0);
+  const [note, setNote] = useState('');
+  const [dateStr, setDateStr] = useState(() => toLocalDateTimeInput(new Date()));
+  const [error, setError] = useState('');
+  const [balances, setBalances] = useState<Map<number, number>>(new Map());
 
-          {/* Date */}
-          <div>
-            <label className="text-xs text-text-muted block mb-1">Date & Time</label>
-            <input
-              type="datetime-local"
-              value={dateStr}
-              onChange={(e) => setDateStr(e.target.value)}
-              className="w-full bg-surface-light rounded-xl px-4 py-3 text-sm
-                text-text outline-none focus:ring-2 focus:ring-primary/50"
-              required
-            />
-          </div>
+  const accounts = useLiveQuery(() => db.accounts.toArray());
 
-          {error && (
-            <p className="text-danger text-sm text-center">{error}</p>
-          )}
+  useEffect(() => {
+    getAllBalances().then(setBalances);
+  }, []);
 
-          <button
-            type="submit"
-            disabled={saving}
-            className="w-full bg-primary text-white rounded-xl py-3.5 text-sm font-semibold
-              active:bg-primary-dark disabled:opacity-50 transition-colors"
-          >
-            {saving ? 'Saving...' : isEditing ? 'Update Transaction' : `Add ${type === 'income' ? 'Income' : 'Expense'}`}
-          </button>
-        </form>
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    onSaving(true);
+    try {
+      const amount = parseFloat(amountStr);
+      if (isNaN(amount) || amount <= 0) throw new Error('Enter an amount greater than zero');
+      if (!fromAccountId) throw new Error('Choose where the money comes from');
+      if (!toAccountId) throw new Error('Choose where the money goes');
+      if (fromAccountId === toAccountId) throw new Error('Pick two different accounts');
+
+      await addTransfer({
+        amount: toPiastres(amount),
+        fromAccountId,
+        toAccountId,
+        note: note.trim() || undefined,
+        date: new Date(dateStr),
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save');
+    } finally {
+      onSaving(false);
+    }
+  }
+
+  const label = (id: number | undefined, name: string) => `${name} · ${formatEGP(balances.get(id!) ?? 0)}`;
+
+  return (
+    <form id={formId} onSubmit={handleSubmit} className="space-y-5">
+      <AmountInput value={amountStr} onChange={(e) => setAmountStr(e.target.value)} aria-label="Amount in EGP" autoFocus required />
+
+      <div className="space-y-2">
+        <Field label="From">
+          <Select value={fromAccountId} onChange={(e) => setFromAccountId(Number(e.target.value))} required>
+            <option value={0} disabled>Choose account</option>
+            {accounts?.map((a) => (
+              <option key={a.id} value={a.id}>{label(a.id, a.name)}</option>
+            ))}
+          </Select>
+        </Field>
+        <div className="flex justify-center" aria-hidden>
+          <span className="size-8 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center">
+            <ArrowDown className="size-4" />
+          </span>
+        </div>
+        <Field label="To">
+          <Select value={toAccountId} onChange={(e) => setToAccountId(Number(e.target.value))} required>
+            <option value={0} disabled>Choose account</option>
+            {accounts?.filter((a) => a.id !== fromAccountId).map((a) => (
+              <option key={a.id} value={a.id}>{label(a.id, a.name)}</option>
+            ))}
+          </Select>
+        </Field>
       </div>
-    </div>
+
+      <Field label="Date and time">
+        <TextInput type="datetime-local" value={dateStr} onChange={(e) => setDateStr(e.target.value)} required />
+      </Field>
+      <Field label="Note">
+        <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" autoComplete="off" />
+      </Field>
+
+      <p className="text-[13px] text-ink-3 px-0.5">Transfers move money between your own accounts. They don’t count as income or spending.</p>
+
+      {error && <Banner tone="error">{error}</Banner>}
+    </form>
   );
 }

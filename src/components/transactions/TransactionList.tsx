@@ -1,119 +1,234 @@
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db';
-import { formatEGP, formatDate, formatTime } from '../../utils/format';
+import { useMemo, useState } from 'react';
+import { MessageSquareText, Pencil, ReceiptText, Trash2 } from 'lucide-react';
+import { formatTime } from '../../utils/format';
 import type { Transaction, Category, Account } from '../../types';
+import { describeTransaction, useLookups } from './transactionHelpers';
+import { Amount, Badge, Button, Card, CategoryIcon, ConfirmSheet, EmptyState, Sheet, cx } from '../ui';
 
 interface Props {
   transactions: Transaction[];
   onEdit: (txn: Transaction) => void;
-  onDelete: (id: number) => void;
+  /** Called after the user confirmed in the app. Delete without asking again. */
+  onDelete: (id: number) => void | Promise<void>;
+  /** Show a flat list without day headings (used for short previews). */
   compact?: boolean;
+  emptyTitle?: string;
+  emptyMessage?: string;
+  emptyAction?: React.ReactNode;
 }
 
-export function TransactionList({ transactions, onEdit, onDelete, compact }: Props) {
-  const categories = useLiveQuery(() => db.categories.toArray());
-  const accounts = useLiveQuery(() => db.accounts.toArray());
+function dayLabel(d: Date, today = new Date()): string {
+  const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((start(today) - start(d)) / 86_400_000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}),
+  });
+}
 
-  const categoryMap = new Map<number, Category>();
-  categories?.forEach(c => categoryMap.set(c.id!, c));
+export function TransactionList({ transactions, onEdit, onDelete, compact, emptyTitle, emptyMessage, emptyAction }: Props) {
+  const { categoryMap, accountMap } = useLookups();
+  const [selected, setSelected] = useState<Transaction | null>(null);
 
-  const accountMap = new Map<number, Account>();
-  accounts?.forEach(a => accountMap.set(a.id!, a));
+  const groups = useMemo(() => {
+    if (compact) return [{ label: '', items: transactions }];
+    const out: { label: string; items: Transaction[] }[] = [];
+    for (const t of transactions) {
+      const label = dayLabel(t.date);
+      const last = out[out.length - 1];
+      if (last && last.label === label) last.items.push(t);
+      else out.push({ label, items: [t] });
+    }
+    return out;
+  }, [transactions, compact]);
 
   if (transactions.length === 0) {
     return (
-      <div className="bg-surface rounded-xl p-8 text-center">
-        <p className="text-4xl mb-3">📋</p>
-        <p className="text-text-muted text-sm">No transactions yet</p>
-      </div>
+      <Card>
+        <EmptyState
+          icon={<ReceiptText />}
+          title={emptyTitle ?? 'No transactions yet'}
+          message={emptyMessage ?? 'Add one with the + button, or import your bank SMS.'}
+          action={emptyAction}
+        />
+      </Card>
     );
   }
 
   return (
-    <div className="space-y-2">
-      {transactions.map((txn) => {
-        const category = txn.categoryId ? categoryMap.get(txn.categoryId) : null;
-        const account = accountMap.get(txn.accountId);
-        const toAccount = txn.toAccountId ? accountMap.get(txn.toAccountId) : null;
-
-        const isIncome = txn.type === 'income';
-        const isTransfer = txn.type === 'transfer';
-        const amountColor = isIncome ? 'text-success' : isTransfer ? 'text-warning' : 'text-danger';
-        const amountPrefix = isIncome ? '+' : isTransfer ? '' : '-';
-        const icon = isTransfer ? '🔄' : category?.icon ?? '📦';
-
-        return (
-          <div
-            key={txn.id}
-            className="bg-surface rounded-xl p-3 flex items-center gap-3 group"
-          >
-            {/* Icon */}
-            <div className="text-2xl shrink-0">{icon}</div>
-
-            {/* Details */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="font-medium text-sm truncate">
-                  {isTransfer
-                    ? `${account?.name ?? '?'} → ${toAccount?.name ?? '?'}`
-                    : category?.name ?? 'Unknown'
-                  }
-                </p>
-                {/* Type badge */}
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${
-                  isIncome ? 'bg-success/15 text-success' :
-                  isTransfer ? 'bg-warning/15 text-warning' :
-                  'bg-danger/15 text-danger'
-                }`}>
-                  {txn.type}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-text-muted mt-0.5">
-                {txn.merchant && <span className="truncate">{txn.merchant}</span>}
-                {txn.merchant && <span>·</span>}
-                <span className="shrink-0">{formatDate(txn.date)}</span>
-                {!compact && <span className="shrink-0">{formatTime(txn.date)}</span>}
-                {txn.originalSms && (
-                  <span
-                    className="shrink-0 text-[9px] bg-primary/15 text-primary px-1.5 py-0.5 rounded font-mono font-medium cursor-help"
-                    title={txn.originalSms}
-                  >
-                    SMS
-                  </span>
-                )}
-              </div>
-              {txn.note && !compact && (
-                <p className="text-xs text-text-muted/70 mt-0.5 truncate">{txn.note}</p>
-              )}
-            </div>
-
-            {/* Amount & Actions */}
-            <div className="text-right shrink-0">
-              <p className={`font-semibold text-sm ${amountColor}`}>
-                {amountPrefix}{formatEGP(txn.amount)}
-              </p>
-              {!compact && (
-                <div className="flex gap-2 mt-1 justify-end [@media(hover:hover)]:opacity-0 group-hover:opacity-100 transition-opacity">
-                  {!isTransfer && (
-                    <button
-                      onClick={() => onEdit(txn)}
-                      className="text-xs text-text-muted hover:text-primary transition-colors"
-                    >
-                      Edit
-                    </button>
-                  )}
-                  <button
-                    onClick={() => onDelete(txn.id!)}
-                    className="text-xs text-text-muted hover:text-danger transition-colors"
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-            </div>
+    <>
+      <div className="space-y-5">
+        {groups.map((g) => (
+          <div key={g.label || 'all'} className="space-y-2">
+            {g.label && <h3 className="text-[13px] font-semibold text-ink-3 px-1">{g.label}</h3>}
+            <Card padded={false} className="py-1.5">
+              {g.items.map((txn) => (
+                <TransactionRow key={txn.id} txn={txn} categoryMap={categoryMap} accountMap={accountMap} onClick={() => setSelected(txn)} showDate={compact} />
+              ))}
+            </Card>
           </div>
-        );
-      })}
-    </div>
+        ))}
+      </div>
+
+      {selected && (
+        <TransactionDetailSheet
+          txn={selected}
+          categoryMap={categoryMap}
+          accountMap={accountMap}
+          onClose={() => setSelected(null)}
+          onEdit={() => {
+            const t = selected;
+            setSelected(null);
+            onEdit(t);
+          }}
+          onDelete={async () => {
+            await onDelete(selected.id!);
+            setSelected(null);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function TransactionRow({
+  txn,
+  categoryMap,
+  accountMap,
+  onClick,
+  showDate,
+}: {
+  txn: Transaction;
+  categoryMap: Map<number, Category>;
+  accountMap: Map<number, Account>;
+  onClick: () => void;
+  showDate?: boolean;
+}) {
+  const d = describeTransaction(txn, categoryMap, accountMap);
+  const tone = txn.type === 'income' ? 'income' : txn.type === 'transfer' ? 'transfer' : 'expense';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full flex items-center gap-3.5 px-4 py-2.5 text-left hover:bg-brand-50/60 active:bg-brand-50 transition-colors"
+    >
+      <CategoryIcon category={d.category} transfer={d.isTransfer} />
+      <div className="flex-1 min-w-0">
+        <p className="text-[15px] font-semibold text-ink truncate" dir="auto">{d.title}</p>
+        <p className="text-[13px] text-ink-3 truncate mt-0.5">
+          {d.uncategorized ? <span className="text-caution font-medium">Needs a category</span> : d.subtitle}
+          {showDate && <span> · {txn.date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>}
+        </p>
+      </div>
+      <div className="text-right shrink-0">
+        <Amount piastres={txn.amount} tone={tone} signed={txn.type !== 'transfer'} />
+        <p className="text-[12px] text-ink-3 mt-0.5 num">{formatTime(txn.date)}</p>
+      </div>
+    </button>
+  );
+}
+
+export function TransactionDetailSheet({
+  txn,
+  categoryMap,
+  accountMap,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  txn: Transaction;
+  categoryMap: Map<number, Category>;
+  accountMap: Map<number, Account>;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void | Promise<void>;
+}) {
+  const d = describeTransaction(txn, categoryMap, accountMap);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const typeLabel = { income: 'Income', expense: 'Expense', transfer: 'Transfer' }[txn.type];
+
+  if (confirming) {
+    return (
+      <ConfirmSheet
+        title="Delete transaction?"
+        message="This removes it from your history and updates the account balance. It can’t be undone."
+        confirmLabel="Delete"
+        busy={busy}
+        onClose={() => setConfirming(false)}
+        onConfirm={async () => {
+          setBusy(true);
+          await onDelete();
+        }}
+      />
+    );
+  }
+
+  const rows: Array<[string, React.ReactNode]> = [
+    ['Type', typeLabel],
+    d.isTransfer ? ['From', d.account?.name ?? '—'] : ['Account', d.account?.name ?? '—'],
+    ...(d.isTransfer ? ([['To', d.toAccount?.name ?? '—']] as Array<[string, React.ReactNode]>) : []),
+    ...(!d.isTransfer
+      ? ([['Category', d.uncategorized ? <Badge tone="warning">Uncategorized</Badge> : d.category?.name]] as Array<[string, React.ReactNode]>)
+      : []),
+    ['Date', txn.date.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' })],
+    ...(txn.merchant ? ([[txn.type === 'income' ? 'From' : 'Paid to', <span dir="auto">{txn.merchant}</span>]] as Array<[string, React.ReactNode]>) : []),
+    ...(txn.note ? ([['Note', <span dir="auto">{txn.note}</span>]] as Array<[string, React.ReactNode]>) : []),
+    ...(txn.referenceId ? ([['Reference', <span className="num">{txn.referenceId}</span>]] as Array<[string, React.ReactNode]>) : []),
+  ];
+
+  return (
+    <Sheet
+      title="Transaction"
+      onClose={onClose}
+      footer={
+        <div className={cx('grid gap-2.5', d.isTransfer ? 'grid-cols-1' : 'grid-cols-2')}>
+          <Button variant="danger" size="lg" icon={<Trash2 className="size-4" />} onClick={() => setConfirming(true)}>
+            Delete
+          </Button>
+          {!d.isTransfer && (
+            <Button variant="secondary" size="lg" icon={<Pencil className="size-4" />} onClick={onEdit}>
+              {d.uncategorized ? 'Set category' : 'Edit'}
+            </Button>
+          )}
+        </div>
+      }
+    >
+      <div className="flex flex-col items-center text-center pt-1 pb-5">
+        <CategoryIcon category={d.category} transfer={d.isTransfer} size="lg" />
+        <p className="text-[15px] font-semibold text-ink-2 mt-3 max-w-full truncate" dir="auto">{d.title}</p>
+        <Amount
+          piastres={txn.amount}
+          tone={txn.type === 'income' ? 'income' : 'neutral'}
+          signed={txn.type !== 'transfer'}
+          size="xl"
+          className="mt-1"
+        />
+      </div>
+
+      <dl className="rounded-2xl bg-well/70 px-4 py-1">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-start justify-between gap-4 py-3 [&+&]:border-t [&+&]:border-hairline">
+            <dt className="text-sm text-ink-3 shrink-0">{k}</dt>
+            <dd className="text-sm font-semibold text-ink text-right min-w-0 break-words">{v}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {txn.originalSms && (
+        <div className="mt-4">
+          <p className="flex items-center gap-1.5 text-[13px] font-semibold text-ink-3 px-1 mb-2">
+            <MessageSquareText className="size-4" /> Original SMS
+          </p>
+          <p dir="auto" className="text-sm text-ink-2 leading-relaxed bg-brand-50 rounded-2xl px-4 py-3 whitespace-pre-wrap break-words">
+            {txn.originalSms}
+          </p>
+        </div>
+      )}
+    </Sheet>
   );
 }

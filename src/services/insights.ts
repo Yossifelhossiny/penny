@@ -10,6 +10,8 @@
 
 import { db } from '../db';
 import type { Category } from '../types';
+import { getMonthTransactions, getRecentMonthlyTotals } from './periods';
+import { addMonths, daysElapsedInMonth } from '../utils/months';
 
 export interface CategorySpendingItem {
   categoryId: number;
@@ -60,17 +62,11 @@ export async function getCategorySpendingBreakdown(
   year: number,
   month: number
 ): Promise<CategorySpendingItem[]> {
-  const start = new Date(year, month, 1);
-  const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
-
-  const [transactions, categories] = await Promise.all([
-    db.transactions
-      .where('date')
-      .between(start, end, true, true)
-      .filter((t) => t.type === 'expense')
-      .toArray(),
+  const [monthTxns, categories] = await Promise.all([
+    getMonthTransactions(year, month),
     db.categories.toArray(),
   ]);
+  const transactions = monthTxns.filter((t) => t.type === 'expense');
 
   const categoryMap = new Map<number, Category>();
   categories.forEach((c) => categoryMap.set(c.id!, c));
@@ -116,56 +112,23 @@ export async function getMonthlyTrend(
   endMonth?: number
 ): Promise<MonthSummaryItem[]> {
   const now = new Date();
-  const targetYear = endYear ?? now.getFullYear();
-  const targetMonth = endMonth ?? now.getMonth();
-
-  const results: MonthSummaryItem[] = [];
-
-  for (let i = monthsCount - 1; i >= 0; i--) {
-    const d = new Date(targetYear, targetMonth - i, 1);
-    const y = d.getFullYear();
-    const m = d.getMonth();
-
-    const start = new Date(y, m, 1);
-    const end = new Date(y, m + 1, 0, 23, 59, 59, 999);
-
-    const monthTxns = await db.transactions
-      .where('date')
-      .between(start, end, true, true)
-      .toArray();
-
-    let incomePiastres = 0;
-    let expensesPiastres = 0;
-
-    for (const t of monthTxns) {
-      if (t.type === 'income') incomePiastres += t.amount;
-      else if (t.type === 'expense') expensesPiastres += t.amount;
-    }
-
-    const netSavingsPiastres = incomePiastres - expensesPiastres;
-    const savingsRate = incomePiastres > 0
-      ? Math.round((netSavingsPiastres / incomePiastres) * 1000) / 10
-      : 0;
-
-    const monthKey = `${y}-${(m + 1).toString().padStart(2, '0')}`;
-    const label = d.toLocaleString('en', { month: 'short' });
-
-    results.push({
-      monthKey,
-      label,
-      year: y,
-      month: m,
-      incomePiastres,
-      incomeEgp: incomePiastres / 100,
-      expensesPiastres,
-      expensesEgp: expensesPiastres / 100,
-      netSavingsPiastres,
-      netSavingsEgp: netSavingsPiastres / 100,
-      savingsRate,
-    });
-  }
-
-  return results;
+  const totals = await getRecentMonthlyTotals(
+    { year: endYear ?? now.getFullYear(), month: endMonth ?? now.getMonth() },
+    monthsCount
+  );
+  return totals.map((t) => ({
+    monthKey: t.key,
+    label: t.shortLabel,
+    year: t.year,
+    month: t.month,
+    incomePiastres: t.incomePiastres,
+    incomeEgp: t.incomePiastres / 100,
+    expensesPiastres: t.expensesPiastres,
+    expensesEgp: t.expensesPiastres / 100,
+    netSavingsPiastres: t.netPiastres,
+    netSavingsEgp: t.netPiastres / 100,
+    savingsRate: t.incomePiastres > 0 ? Math.round((t.netPiastres / t.incomePiastres) * 1000) / 10 : 0,
+  }));
 }
 
 /**
@@ -175,14 +138,8 @@ export async function getFinancialHealthInsights(
   year: number,
   month: number
 ): Promise<FinancialHealthInsights> {
-  const start = new Date(year, month, 1);
-  const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
-
   const [currentTxns, categoryBreakdown] = await Promise.all([
-    db.transactions
-      .where('date')
-      .between(start, end, true, true)
-      .toArray(),
+    getMonthTransactions(year, month),
     getCategorySpendingBreakdown(year, month),
   ]);
 
@@ -200,11 +157,8 @@ export async function getFinancialHealthInsights(
     : 0;
 
   // Days in month up to today (or all days if looking at a past month)
-  const now = new Date();
-  const isCurrentMonth = now.getFullYear() === year && now.getMonth() === month;
-  const daysElapsed = isCurrentMonth
-    ? Math.max(1, now.getDate())
-    : new Date(year, month + 1, 0).getDate();
+  // Past months: all days; current month: days so far; future months: none yet.
+  const daysElapsed = Math.max(1, daysElapsedInMonth(year, month));
 
   const averageDailyBurnPiastres = Math.round(expensesPiastres / daysElapsed);
 
@@ -220,14 +174,8 @@ export async function getFinancialHealthInsights(
     : null;
 
   // Compare with previous month
-  const prevDate = new Date(year, month - 1, 1);
-  const prevStart = new Date(prevDate.getFullYear(), prevDate.getMonth(), 1);
-  const prevEnd = new Date(prevDate.getFullYear(), prevDate.getMonth() + 1, 0, 23, 59, 59, 999);
-
-  const prevTxns = await db.transactions
-    .where('date')
-    .between(prevStart, prevEnd, true, true)
-    .toArray();
+  const prev = addMonths({ year, month }, -1);
+  const prevTxns = await getMonthTransactions(prev.year, prev.month);
 
   let prevIncome = 0;
   let prevExpenses = 0;

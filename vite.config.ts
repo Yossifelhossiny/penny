@@ -16,13 +16,13 @@ export default defineConfig({
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
       },
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Penny — Finance Tracker',
         short_name: 'Penny',
         description: 'Local-first personal finance tracker',
-        theme_color: '#0f172a',
-        background_color: '#0f172a',
+        theme_color: '#faf9fc',
+        background_color: '#faf9fc',
         display: 'standalone',
         orientation: 'portrait',
         scope: '/',

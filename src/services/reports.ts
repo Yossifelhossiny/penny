@@ -7,6 +7,8 @@
 
 import { db } from '../db';
 import type { Category, Transaction } from '../types';
+import { getTransactionsBetween } from './periods';
+import { daysElapsedInMonth, monthRange, yearRange } from '../utils/months';
 
 export interface AccountReportRow {
   accountId: number;
@@ -70,13 +72,9 @@ export async function generateFinancialReport(
   year: number,
   month: number = 0
 ): Promise<PeriodFinancialReport> {
-  const startDate = periodType === 'monthly'
-    ? new Date(year, month, 1)
-    : new Date(year, 0, 1);
-
-  const endDate = periodType === 'monthly'
-    ? new Date(year, month + 1, 0, 23, 59, 59, 999)
-    : new Date(year, 11, 31, 23, 59, 59, 999);
+  const range = periodType === 'monthly' ? monthRange(year, month) : yearRange(year);
+  const startDate = range.start;
+  const endDate = range.end;
 
   const label = periodType === 'monthly'
     ? `${startDate.toLocaleString('en', { month: 'long' })} ${year}`
@@ -85,7 +83,7 @@ export async function generateFinancialReport(
   const [accounts, categories, allTxnsBeforeEnd] = await Promise.all([
     db.accounts.toArray(),
     db.categories.toArray(),
-    db.transactions.where('date').belowOrEqual(endDate).toArray(),
+    getTransactionsBetween(new Date(-8.64e15), endDate),
   ]);
 
   const categoryMap = new Map<number, Category>();
@@ -223,8 +221,10 @@ export async function generateFinancialReport(
   }
 
   // Days in period
-  const msInDay = 1000 * 60 * 60 * 24;
-  const daysInPeriod = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / msInDay));
+  // Calendar days, not milliseconds / 24h (DST days are 23 or 25 hours long).
+  const daysInPeriod = periodType === 'monthly'
+    ? Math.max(1, daysElapsedInMonth(year, month))
+    : Math.max(1, Array.from({ length: 12 }, (_, m) => daysElapsedInMonth(year, m)).reduce((a, b) => a + b, 0));
   const dailyAverageExpensePiastres = Math.round(totalExpensePiastres / daysInPeriod);
 
   return {

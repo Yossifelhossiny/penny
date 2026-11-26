@@ -123,6 +123,6 @@ describe('service worker push handling', () => {
   });
 
   it('test push', async () => {
-    expect((await handlePushPayload({ v: 1, secret: 's3cret', kind: 'test' }))?.title).toContain('✅');
+    expect((await handlePushPayload({ v: 1, secret: 's3cret', kind: 'test' }))?.title).toContain('Automatic import is on');
   });
 });

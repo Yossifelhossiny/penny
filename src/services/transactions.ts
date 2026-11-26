@@ -1,4 +1,5 @@
 import { db } from '../db';
+import { getMonthTransactions } from './periods';
 import type { Transaction, TransactionType } from '../types';
 
 /**
@@ -224,13 +225,7 @@ export async function getMonthlyTotals(year: number, month: number): Promise<{
   income: number;
   expenses: number;
 }> {
-  const start = new Date(year, month, 1);
-  const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
-
-  const transactions = await db.transactions
-    .where('date')
-    .between(start, end, true, true)
-    .toArray();
+  const transactions = await getMonthTransactions(year, month);
 
   let income = 0;
   let expenses = 0;

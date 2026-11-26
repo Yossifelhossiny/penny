@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { BellRing, Check, Copy, Zap } from 'lucide-react';
 import {
   checkPushSupport,
   disableAutoImport,
@@ -8,12 +9,13 @@ import {
   sendTestPush,
   type PushSupport,
 } from '../../services/push/pushSetup';
+import { Badge, Banner, Button, Card, ConfirmSheet } from '../ui';
 
 type Status = 'idle' | 'working' | 'copied' | 'tested';
 
 /**
- * "Automatic import" — lets the iPhone Shortcut deliver SMS straight into
- * Penny (no Sync button) and shows a notification for each one.
+ * "Automatic import" — the iPhone Shortcut delivers each bank SMS straight
+ * into Penny (no Sync button) and a notification confirms it.
  */
 export function AutoImportCard() {
   const [support, setSupport] = useState<PushSupport | null>(() => checkPushSupport());
@@ -21,11 +23,11 @@ export function AutoImportCard() {
   const [enabled, setEnabled] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [confirmOff, setConfirmOff] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const settings = await getPushSettings();
-      setEnabled(!!settings);
+      setEnabled(!!(await getPushSettings()));
       setCode(await getSetupCode());
     })();
   }, []);
@@ -34,14 +36,13 @@ export function AutoImportCard() {
     setError(null);
     setStatus('working');
     try {
-      const c = await enableAutoImport();
-      setCode(c);
+      setCode(await enableAutoImport());
       setEnabled(true);
-      setStatus('idle');
     } catch (e) {
-      setStatus('idle');
       setError(e instanceof Error ? e.message : 'Could not turn on automatic import');
       setSupport(checkPushSupport());
+    } finally {
+      setStatus('idle');
     }
   }
 
@@ -70,79 +71,73 @@ export function AutoImportCard() {
     }
   }
 
-  async function handleDisable() {
-    if (!confirm('Turn off automatic import? The Shortcut will stop delivering SMS until you turn it on again.')) return;
-    await disableAutoImport();
-    setEnabled(false);
-    setCode(null);
-  }
-
   return (
-    <div className="bg-surface rounded-xl p-4 space-y-3 border border-primary/20">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="font-semibold text-sm">⚡ Automatic import</p>
-          <p className="text-xs text-text-muted mt-0.5">
-            Bank SMS are saved by themselves — no Sync button — and you get a notification for each one.
-          </p>
-        </div>
-        <span
-          className={`text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${
-            enabled ? 'bg-primary/15 text-primary' : 'bg-surface-light text-text-muted'
-          }`}
-        >
-          {enabled ? 'On' : 'Off'}
+    <Card className="space-y-4">
+      <div className="flex items-start gap-3.5">
+        <span className="size-11 rounded-[14px] bg-grad-primary text-white flex items-center justify-center shrink-0 shadow-raised">
+          <Zap className="size-5" />
         </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-[15px] font-bold text-ink">Automatic import</p>
+            <Badge tone={enabled ? 'brand' : 'neutral'}>{enabled ? 'On' : 'Off'}</Badge>
+          </div>
+          <p className="text-[13px] text-ink-3 mt-0.5">Bank SMS save themselves — no Sync button — and you get a notification for each.</p>
+        </div>
       </div>
 
       {support && !support.ok && (
-        <p className="text-xs text-warning bg-warning/10 rounded-lg p-2">
-          {support.reason === 'not-installed' &&
-            'Open Penny from its Home Screen icon (not Safari) to turn this on.'}
-          {support.reason === 'denied' &&
-            'Notifications are blocked. iPhone Settings → Notifications → Penny → Allow Notifications, then try again.'}
-          {support.reason === 'unsupported' &&
-            'This iPhone needs iOS 16.4 or newer for automatic import.'}
-        </p>
+        <Banner tone="warning">
+          {support.reason === 'not-installed' && 'Open Penny from its Home Screen icon (not Safari) to turn this on.'}
+          {support.reason === 'denied' && 'Notifications are blocked. iPhone Settings → Notifications → Penny → Allow Notifications, then try again.'}
+          {support.reason === 'unsupported' && 'This iPhone needs iOS 16.4 or newer for automatic import.'}
+        </Banner>
       )}
 
       {!enabled && (
-        <button
-          onClick={handleEnable}
-          disabled={status === 'working' || (support !== null && !support.ok && support.reason !== 'denied')}
-          className="w-full bg-primary text-background font-semibold py-2.5 rounded-lg text-sm disabled:opacity-50"
-        >
-          {status === 'working' ? 'Turning on…' : 'Turn on automatic import'}
-        </button>
+        <Button block onClick={handleEnable} loading={status === 'working'} disabled={support !== null && !support.ok && support.reason !== 'denied'}>
+          Turn on automatic import
+        </Button>
       )}
 
       {enabled && code && (
-        <div className="space-y-2">
-          <p className="text-xs text-text-muted">
-            Setup code for your Shortcut (keep it private — it lets the Shortcut add SMS to this Penny):
-          </p>
-          <div className="bg-background rounded-lg p-2 text-[10px] font-mono break-all max-h-16 overflow-y-auto select-all text-text-muted">
-            {code}
+        <div className="space-y-3">
+          <div>
+            <p className="text-[13px] font-semibold text-ink-2 mb-1.5">Setup code for your Shortcut</p>
+            <p className="rounded-xl bg-well px-3 py-2.5 text-[11px] font-mono break-all max-h-16 overflow-y-auto select-all text-ink-3">{code}</p>
+            <p className="text-[12px] text-ink-3 mt-1.5">Keep it private — it lets the Shortcut add SMS to this Penny.</p>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={handleCopy} className="bg-primary text-background font-semibold py-2 rounded-lg text-sm">
-              {status === 'copied' ? '✓ Copied' : '📋 Copy code'}
-            </button>
-            <button
-              onClick={handleTest}
-              disabled={status === 'working'}
-              className="bg-surface-light text-text font-medium py-2 rounded-lg text-sm disabled:opacity-50"
-            >
-              {status === 'tested' ? '✓ Sent — check notification' : status === 'working' ? 'Sending…' : '🔔 Send test'}
-            </button>
+          <div className="grid grid-cols-2 gap-2.5">
+            <Button onClick={handleCopy} icon={status === 'copied' ? <Check className="size-4" /> : <Copy className="size-4" />}>
+              {status === 'copied' ? 'Copied' : 'Copy code'}
+            </Button>
+            <Button variant="secondary" onClick={handleTest} loading={status === 'working'} icon={<BellRing className="size-4" />}>
+              {status === 'tested' ? 'Sent' : 'Send test'}
+            </Button>
           </div>
-          <button onClick={handleDisable} className="w-full text-xs text-text-muted underline py-1">
+          {status === 'tested' && <p className="text-[13px] text-income font-semibold text-center">Check for a notification from Penny.</p>}
+          <button type="button" onClick={() => setConfirmOff(true)} className="w-full text-[13px] font-semibold text-ink-3 py-1">
             Turn off
           </button>
         </div>
       )}
 
-      {error && <p className="text-xs text-danger">{error}</p>}
-    </div>
+      {error && <Banner tone="error">{error}</Banner>}
+
+      {confirmOff && (
+        <ConfirmSheet
+          title="Turn off automatic import?"
+          message="The Shortcut will stop delivering SMS to Penny until you turn it on again and paste the new code."
+          confirmLabel="Turn off"
+          onClose={() => setConfirmOff(false)}
+          onConfirm={async () => {
+            await disableAutoImport();
+            setEnabled(false);
+            setCode(null);
+            setConfirmOff(false);
+          }}
+        />
+      )}
+    </Card>
   );
 }

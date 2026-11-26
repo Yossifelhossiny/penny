@@ -96,4 +96,4 @@ export interface SmsInboxEntry {
   updatedAt: Date;
 }
 
-export type Page = 'dashboard' | 'transactions' | 'accounts' | 'settings' | 'import' | 'budgets' | 'reports';
+export type Page = 'dashboard' | 'transactions' | 'accounts' | 'settings' | 'import' | 'budgets' | 'reports' | 'categories';

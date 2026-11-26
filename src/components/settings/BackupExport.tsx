@@ -1,192 +1,74 @@
 /**
- * BackupExport — UI for JSON backup/restore and CSV export.
- * All operations are 100% local — no network, no servers.
+ * Backup, restore and CSV export. Everything stays on the device.
  */
-
 import { useRef, useState } from 'react';
-import {
-  downloadJsonBackup,
-  downloadTransactionsCsv,
-  validateBackupData,
-  restoreBackupData,
-} from '../../services/backup';
-
-type ToastKind = 'success' | 'error' | 'info';
-
-interface Toast {
-  id: number;
-  kind: ToastKind;
-  message: string;
-}
-
-let toastSeq = 0;
+import { Download, FileSpreadsheet, Upload } from 'lucide-react';
+import { downloadJsonBackup, downloadTransactionsCsv, validateBackupData, restoreBackupData, type PennyBackupData } from '../../services/backup';
+import { ConfirmSheet, ListRow, useToasts } from '../ui';
 
 export function BackupExport() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const [busy, setBusy] = useState<string | null>(null); // which action is running
+  const [busy, setBusy] = useState<'backup' | 'restore' | 'csv' | null>(null);
+  const [pending, setPending] = useState<{ name: string; data: PennyBackupData } | null>(null);
+  const toast = useToasts();
 
-  /* ── Toast helpers ───────────────────────────────────────────── */
-  function addToast(message: string, kind: ToastKind = 'success') {
-    const id = ++toastSeq;
-    setToasts((prev) => [...prev, { id, kind, message }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
-  }
-
-  /* ── JSON Backup ─────────────────────────────────────────────── */
-  async function handleDownloadBackup() {
+  async function run(kind: 'backup' | 'csv') {
+    setBusy(kind);
     try {
-      setBusy('backup');
-      await downloadJsonBackup();
-      addToast('✅ Backup downloaded successfully!', 'success');
+      if (kind === 'backup') await downloadJsonBackup();
+      else await downloadTransactionsCsv();
+      toast.show(kind === 'backup' ? 'Backup downloaded' : 'CSV exported');
     } catch (err) {
-      addToast(`❌ Backup failed: ${(err as Error).message}`, 'error');
+      toast.show(`${kind === 'backup' ? 'Backup' : 'Export'} failed: ${(err as Error).message}`, 'error');
     } finally {
       setBusy(null);
     }
   }
 
-  /* ── JSON Restore ─────────────────────────────────────────────── */
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+  async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = ''; // allow choosing the same file again
     if (!file) return;
-    // reset input so the same file can be re-selected
-    e.target.value = '';
-
-    if (
-      !confirm(
-        `This will OVERWRITE all current data with the contents of "${file.name}".\n\nAre you sure?`
-      )
-    )
-      return;
-
     try {
-      setBusy('restore');
-      const text = await file.text();
-      const parsed: unknown = JSON.parse(text);
-      const result = validateBackupData(parsed);
-
-      if (!result.valid || !result.data) {
-        addToast(`❌ Invalid backup file: ${result.error}`, 'error');
-        return;
-      }
-
-      const restored = await restoreBackupData(result.data, 'overwrite');
-      addToast(
-        `✅ Restored: ${restored.accountsRestored} accounts, ${restored.transactionsRestored} transactions, ${restored.categoriesRestored} categories.`,
-        'success'
-      );
-    } catch (err) {
-      addToast(`❌ Restore failed: ${(err as Error).message}`, 'error');
-    } finally {
-      setBusy(null);
+      const result = validateBackupData(JSON.parse(await file.text()));
+      if (!result.valid || !result.data) return toast.show(`That file isn’t a Penny backup: ${result.error}`, 'error');
+      setPending({ name: file.name, data: result.data });
+    } catch {
+      toast.show('Couldn’t read that file', 'error');
     }
   }
 
-  /* ── CSV Export ──────────────────────────────────────────────── */
-  async function handleExportCsv() {
+  async function restore() {
+    if (!pending) return;
+    setBusy('restore');
     try {
-      setBusy('csv');
-      await downloadTransactionsCsv();
-      addToast('✅ CSV exported successfully!', 'success');
+      const r = await restoreBackupData(pending.data, 'overwrite');
+      toast.show(`Restored ${r.transactionsRestored} transactions and ${r.accountsRestored} accounts`);
     } catch (err) {
-      addToast(`❌ CSV export failed: ${(err as Error).message}`, 'error');
+      toast.show(`Restore failed: ${(err as Error).message}`, 'error');
     } finally {
       setBusy(null);
+      setPending(null);
     }
   }
-
-  /* ── Toast colour map ─────────────────────────────────────────── */
-  const toastClass: Record<ToastKind, string> = {
-    success: 'bg-success/15 border-success/30 text-success',
-    error: 'bg-danger/15 border-danger/30 text-danger',
-    info: 'bg-primary/15 border-primary/30 text-primary',
-  };
 
   return (
-    <div className="space-y-3">
-      <p className="font-medium text-sm">📦 Backup &amp; Export</p>
-      <p className="text-xs text-text-muted">
-        All backups stay on your device — nothing is uploaded anywhere.
-      </p>
-
-      {/* Action buttons */}
-      <div className="space-y-2">
-        {/* Download JSON */}
-        <button
-          type="button"
-          disabled={!!busy}
-          onClick={handleDownloadBackup}
-          className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          <span className="flex items-center gap-2">
-            <span>💾</span>
-            <span>Download JSON Backup</span>
-          </span>
-          {busy === 'backup' ? (
-            <span className="text-xs animate-pulse">Exporting…</span>
-          ) : (
-            <span className="text-xs opacity-70">Full database</span>
-          )}
-        </button>
-
-        {/* Import JSON */}
-        <button
-          type="button"
-          disabled={!!busy}
-          onClick={() => fileInputRef.current?.click()}
-          className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-warning/10 hover:bg-warning/20 text-warning text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          <span className="flex items-center gap-2">
-            <span>📂</span>
-            <span>Import JSON Backup</span>
-          </span>
-          {busy === 'restore' ? (
-            <span className="text-xs animate-pulse">Restoring…</span>
-          ) : (
-            <span className="text-xs opacity-70">Overwrites data</span>
-          )}
-        </button>
-
-        {/* Hidden file input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json,application/json"
-          className="hidden"
-          onChange={handleImport}
+    <>
+      <ListRow icon={<Download />} label="Download backup" detail="Everything, as one file" onClick={() => run('backup')} busy={busy === 'backup'} disabled={!!busy} />
+      <ListRow icon={<Upload />} label="Restore from backup" detail="Replaces what’s on this device" onClick={() => fileInputRef.current?.click()} busy={busy === 'restore'} disabled={!!busy} />
+      <ListRow icon={<FileSpreadsheet />} label="Export to CSV" detail="Opens in Excel or Google Sheets" onClick={() => run('csv')} busy={busy === 'csv'} disabled={!!busy} />
+      <input ref={fileInputRef} type="file" accept=".json,application/json" className="hidden" onChange={pickFile} />
+      {pending && (
+        <ConfirmSheet
+          title="Replace your data?"
+          message={<>Everything currently in Penny will be replaced with “{pending.name}”. Download a backup first if you might need it.</>}
+          confirmLabel="Replace"
+          busy={busy === 'restore'}
+          onClose={() => setPending(null)}
+          onConfirm={restore}
         />
-
-        {/* Export CSV */}
-        <button
-          type="button"
-          disabled={!!busy}
-          onClick={handleExportCsv}
-          className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-success/10 hover:bg-success/20 text-success text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          <span className="flex items-center gap-2">
-            <span>📊</span>
-            <span>Export Transactions CSV</span>
-          </span>
-          {busy === 'csv' ? (
-            <span className="text-xs animate-pulse">Generating…</span>
-          ) : (
-            <span className="text-xs opacity-70">Excel &amp; Sheets ready</span>
-          )}
-        </button>
-      </div>
-
-      {/* Toast notifications */}
-      <div className="fixed bottom-24 left-4 right-4 z-50 space-y-2 pointer-events-none">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`border rounded-xl px-4 py-3 text-sm font-medium shadow-lg ${toastClass[t.kind]}`}
-          >
-            {t.message}
-          </div>
-        ))}
-      </div>
-    </div>
+      )}
+      {toast.node}
+    </>
   );
 }

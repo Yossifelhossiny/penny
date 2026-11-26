@@ -8,6 +8,8 @@
  */
 
 import { db } from '../db';
+import { getMonthTransactions } from './periods';
+import { monthKey } from '../utils/months';
 import type { Budget, SavingsGoal, Category } from '../types';
 
 export interface BudgetProgress {
@@ -64,7 +66,7 @@ export interface GoalProgress {
  * Format a year and month (0-indexed) to monthKey string "YYYY-MM".
  */
 export function toMonthKey(year: number, month: number): string {
-  return `${year}-${(month + 1).toString().padStart(2, '0')}`;
+  return monthKey(year, month);
 }
 
 /**
@@ -120,18 +122,12 @@ export async function getBudgetsWithProgress(
   month: number
 ): Promise<BudgetProgress[]> {
   const currentMonthKey = toMonthKey(year, month);
-  const start = new Date(year, month, 1);
-  const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
-
-  const [allBudgets, monthExpenses, categories] = await Promise.all([
+  const [allBudgets, monthTxns, categories] = await Promise.all([
     db.budgets.toArray(),
-    db.transactions
-      .where('date')
-      .between(start, end, true, true)
-      .filter((t) => t.type === 'expense')
-      .toArray(),
+    getMonthTransactions(year, month),
     db.categories.toArray(),
   ]);
+  const monthExpenses = monthTxns.filter((t) => t.type === 'expense');
 
   const categoryMap = new Map<number, Category>();
   categories.forEach((c) => categoryMap.set(c.id!, c));
@@ -198,18 +194,12 @@ export async function getOverallBudgetProgress(
   month: number
 ): Promise<OverallBudgetProgress | null> {
   const currentMonthKey = toMonthKey(year, month);
-  const start = new Date(year, month, 1);
-  const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
-
-  const [allBudgets, monthExpenses, categoryProgressList] = await Promise.all([
+  const [allBudgets, monthTxns, categoryProgressList] = await Promise.all([
     db.budgets.toArray(),
-    db.transactions
-      .where('date')
-      .between(start, end, true, true)
-      .filter((t) => t.type === 'expense')
-      .toArray(),
+    getMonthTransactions(year, month),
     getBudgetsWithProgress(year, month),
   ]);
+  const monthExpenses = monthTxns.filter((t) => t.type === 'expense');
 
   const totalSpentPiastres = monthExpenses.reduce((sum, t) => sum + t.amount, 0);
 

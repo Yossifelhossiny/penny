@@ -1,166 +1,115 @@
 import { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { ChevronRight, Plus, Wallet } from 'lucide-react';
 import { db } from '../db';
-import { formatEGP } from '../utils/format';
 import { getAllBalances } from '../services/transactions';
 import { AccountDetailView } from '../components/accounts/AccountDetailView';
 import { AccountFormModal } from '../components/accounts/AccountFormModal';
+import { AccountIcon, Amount, Button, Card, EmptyState, PageHeader, Section } from '../components/ui';
+
+const TYPE_LABEL: Record<string, string> = { bank: 'Bank', vodafone_cash: 'Mobile wallet', cash: 'Cash' };
 
 export function Accounts() {
-  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
   const [balances, setBalances] = useState<Map<number, number>>(new Map());
 
-  const accounts = useLiveQuery(() => db.accounts.toArray()) ?? [];
-  const allTransactions = useLiveQuery(() => db.transactions.toArray());
+  const accounts = useLiveQuery(() => db.accounts.toArray());
+  const allTxns = useLiveQuery(() => db.transactions.toArray());
 
   useEffect(() => {
-    if (allTransactions === undefined) return;
+    if (allTxns === undefined) return;
     getAllBalances().then(setBalances);
-  }, [allTransactions]);
+  }, [allTxns]);
 
-  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+  const list = accounts ?? [];
+  const selected = list.find((a) => a.id === selectedId);
+  const reload = () => getAllBalances().then(setBalances);
 
-  // If currently viewing a specific account detail
-  if (selectedAccount) {
+  if (selected) {
     return (
       <AccountDetailView
-        account={selectedAccount}
-        onBack={() => setSelectedAccountId(null)}
-        onAccountUpdated={() => {
-          getAllBalances().then(setBalances);
-        }}
+        account={selected}
+        onBack={() => setSelectedId(null)}
+        onAccountUpdated={reload}
         onAccountDeleted={() => {
-          setSelectedAccountId(null);
-          getAllBalances().then(setBalances);
+          setSelectedId(null);
+          reload();
         }}
       />
     );
   }
 
-  const totalBalance = accounts.reduce((sum, a) => {
-    return sum + (balances.get(a.id!) ?? a.openingBalance);
-  }, 0);
+  const total = list.reduce((s, a) => s + (balances.get(a.id!) ?? a.openingBalance), 0);
+  const share = (v: number) => (total > 0 ? Math.max(0, Math.round((v / total) * 100)) : 0);
 
   return (
-    <div className="p-4 space-y-5">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <span>💳</span>
-            <span>Accounts</span>
-          </h2>
-          <p className="text-xs text-text-muted mt-0.5">
-            Manage bank accounts, mobile wallets, and cash
-          </p>
-        </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Accounts"
+        actions={
+          <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>
+            Add
+          </Button>
+        }
+      />
 
-        <button
-          type="button"
-          onClick={() => setShowCreateModal(true)}
-          className="text-xs bg-primary text-white font-medium px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-primary-dark transition-colors cursor-pointer"
-        >
-          <span>+</span>
-          <span>Add Account</span>
-        </button>
-      </div>
-
-      {/* Total Balance Card */}
-      <div className="bg-surface rounded-2xl p-5 text-center border border-white/5 space-y-1">
-        <p className="text-xs text-text-muted">Total Net Balance</p>
-        <p className="text-3xl font-bold text-primary">{formatEGP(totalBalance)}</p>
-        <p className="text-[11px] text-text-muted pt-1">
-          Across {accounts.length} account{accounts.length === 1 ? '' : 's'}
-        </p>
-      </div>
-
-      {/* Account Cards */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-            Your Accounts
-          </h3>
-          <span className="text-[11px] text-text-muted">
-            Tap an account to view history & reconcile
-          </span>
-        </div>
-
-        {accounts.length === 0 ? (
-          <div className="bg-surface rounded-xl p-8 text-center border border-white/5 space-y-2">
-            <p className="text-3xl">🏦</p>
-            <p className="text-sm font-semibold">No accounts yet</p>
-            <p className="text-xs text-text-muted">
-              Add your bank account, Vodafone Cash, or Cash Wallet to get started.
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowCreateModal(true)}
-              className="mt-2 text-xs bg-primary text-white px-3 py-1.5 rounded-lg font-medium inline-block cursor-pointer"
-            >
-              + Create First Account
-            </button>
-          </div>
-        ) : (
-          accounts.map((account) => {
-            const balance = balances.get(account.id!) ?? account.openingBalance;
-            return (
+      <Card className="bg-grad-soft shadow-none">
+        <p className="text-[13px] font-semibold text-brand-800/70">Net balance</p>
+        <Amount piastres={total} size="xl" className="mt-1 !text-brand-900" />
+        {list.length > 1 && total > 0 && (
+          <div className="mt-4 flex h-2 rounded-full overflow-hidden bg-white/70 gap-0.5" aria-hidden>
+            {list.map((a, i) => (
               <div
-                key={account.id}
-                onClick={() => setSelectedAccountId(account.id!)}
-                className="bg-surface hover:bg-surface-light/60 rounded-xl p-4 border border-white/5 hover:border-white/10 transition-all cursor-pointer group space-y-3"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-3xl shrink-0 group-hover:scale-105 transition-transform">
-                      {account.icon}
-                    </span>
-                    <div>
-                      <p className="font-semibold text-sm text-text flex items-center gap-1.5">
-                        <span>{account.name}</span>
-                        <span className="text-xs text-text-muted [@media(hover:hover)]:opacity-0 group-hover:opacity-100 transition-opacity">
-                          →
-                        </span>
-                      </p>
-                      <p className="text-[11px] text-text-muted capitalize">
-                        {account.type.replace('_', ' ')}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="text-right">
-                    <p className="text-xs text-text-muted">Balance</p>
-                    <p className="text-xl font-bold" style={{ color: account.color }}>
-                      {formatEGP(balance)}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Footer info row */}
-                <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-text-muted">
-                  <span>
-                    {account.openingBalance > 0
-                      ? `Opening: ${formatEGP(account.openingBalance)}`
-                      : 'No opening balance'}
-                  </span>
-                  <span className="text-primary font-medium group-hover:underline">
-                    View History & Ledger →
-                  </span>
-                </div>
-              </div>
-            );
-          })
+                key={a.id}
+                className="h-full"
+                style={{
+                  width: `${share(balances.get(a.id!) ?? a.openingBalance)}%`,
+                  background: ['#5034a8', '#7253d6', '#9678ed', '#c2b1f1'][i % 4],
+                }}
+              />
+            ))}
+          </div>
         )}
-      </div>
+      </Card>
 
-      {/* Create Account Modal */}
-      {showCreateModal && (
+      <Section title="Your accounts">
+        {list.length === 0 ? (
+          <Card>
+            <EmptyState
+              icon={<Wallet />}
+              title="No accounts yet"
+              message="Add your bank card, Vodafone Cash or cash wallet to start tracking."
+              action={<Button onClick={() => setCreating(true)}>Add account</Button>}
+            />
+          </Card>
+        ) : (
+          <Card padded={false} className="py-1.5">
+            {list.map((a) => {
+              const bal = balances.get(a.id!) ?? a.openingBalance;
+              return (
+                <button key={a.id} type="button" onClick={() => setSelectedId(a.id!)} className="w-full flex items-center gap-3.5 px-4 py-3.5 text-left hover:bg-brand-50/60 transition-colors">
+                  <AccountIcon type={a.type} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-semibold text-ink truncate">{a.name}</p>
+                    <p className="text-[13px] text-ink-3">{TYPE_LABEL[a.type] ?? 'Account'}{total > 0 && bal > 0 ? ` · ${share(bal)}%` : ''}</p>
+                  </div>
+                  <Amount piastres={bal} className={bal < 0 ? '!text-expense' : undefined} />
+                  <ChevronRight className="size-4 text-ink-4 -mr-1" />
+                </button>
+              );
+            })}
+          </Card>
+        )}
+      </Section>
+
+      {creating && (
         <AccountFormModal
-          onClose={() => setShowCreateModal(false)}
-          onSaved={(newId) => {
-            getAllBalances().then(setBalances);
-            setShowCreateModal(false);
-            if (newId) setSelectedAccountId(newId);
+          onClose={() => setCreating(false)}
+          onSaved={(id) => {
+            reload();
+            setCreating(false);
+            if (id) setSelectedId(id);
           }}
         />
       )}

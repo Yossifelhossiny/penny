@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { AlertTriangle, Check, ChevronDown, Copy, MessageSquareText, X } from 'lucide-react';
 import type { Account, Category } from '../../types';
 import type { SmsReviewItem } from '../../services/sms/smsImportService';
-import { formatEGP } from '../../utils/format';
+import { Amount, Badge, CategoryIcon, Field, Select, TextInput, Toggle, cx } from '../ui';
 
 interface Props {
   item: SmsReviewItem;
@@ -12,460 +13,190 @@ interface Props {
   onRemove: () => void;
 }
 
-export function SmsReviewCard({
-  item,
-  index,
-  accounts,
-  categories,
-  onUpdate,
-  onRemove,
-}: Props) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [showOriginal, setShowOriginal] = useState(false);
+const SOURCE: Record<string, string> = {
+  generic_bank: 'Bank',
+  instapay: 'InstaPay',
+  vodafone_cash: 'Vodafone Cash',
+  unknown: 'Unrecognised',
+};
 
+/**
+ * One parsed SMS. The summary shows what Penny will save; details open in
+ * place for corrections. Problems (duplicates, unclear dates) are shown as
+ * plain sentences above the fields they concern.
+ */
+export function SmsReviewCard({ item, accounts, categories, onUpdate, onRemove }: Props) {
   const parsed = item.parsed;
+  const needsDate = !item.isBalanceOnly && item.action !== 'ignore' && item.dateUnresolved && !!item.dateWarning;
+  const [open, setOpen] = useState(needsDate || (parsed.confidence === 'low' && !item.isBalanceOnly));
+  const [showSms, setShowSms] = useState(false);
 
-  // Source styling
-  const sourceLabels: Record<string, { label: string; icon: string; color: string }> = {
-    generic_bank: { label: 'Bank SMS', icon: '🏦', color: 'bg-blue-500/15 text-blue-400' },
-    instapay: { label: 'InstaPay', icon: '⚡', color: 'bg-amber-500/15 text-amber-400' },
-    vodafone_cash: { label: 'Vodafone Cash', icon: '📱', color: 'bg-red-500/15 text-red-400' },
-    unknown: { label: 'Unknown Source', icon: '❓', color: 'bg-slate-500/15 text-slate-400' },
-  };
+  const account = accounts.find((a) => a.id === item.accountId);
+  const toAccount = accounts.find((a) => a.id === item.toAccountId);
+  const category = categories.find((c) => c.id === item.categoryId);
+  const options = categories.filter((c) => (item.action === 'income' ? c.type === 'income' : item.action === 'expense' ? c.type === 'expense' : false));
+  const piastres = Math.round((parseFloat(item.amountEgp) || 0) * 100);
+  const duplicate = item.isBatchDuplicate || item.isDbDuplicate;
+  const inactive = item.isBalanceOnly || item.action === 'ignore';
+  const date = new Date(item.dateStr);
 
-  const srcInfo = sourceLabels[parsed.source] || sourceLabels.unknown;
-
-  // Type styling
-  const typeBadge = {
-    income: { label: 'Income', color: 'bg-success/15 text-success' },
-    expense: { label: 'Expense', color: 'bg-danger/15 text-danger' },
-    transfer: { label: 'Transfer', color: 'bg-warning/15 text-warning' },
-    ignore: { label: 'Informational', color: 'bg-slate-500/15 text-slate-400' },
-  }[item.action];
-
-  const sourceAccount = accounts.find(a => a.id === item.accountId);
-  const toAccount = accounts.find(a => a.id === item.toAccountId);
-  const category = categories.find(c => c.id === item.categoryId);
-
-  // Available categories for current action
-  const availableCategories = categories.filter(c => {
-    if (item.action === 'income') return c.type === 'income';
-    if (item.action === 'expense') return c.type === 'expense';
-    return false;
-  });
-
-  const parsedAmountPiastres = Math.round((parseFloat(item.amountEgp) || 0) * 100);
+  const title = item.merchant || (item.action === 'transfer' ? 'Transfer' : category?.name ?? 'Transaction');
+  const sub =
+    item.action === 'transfer'
+      ? `${account?.name ?? 'Choose account'} → ${toAccount?.name ?? 'Choose account'}`
+      : [category?.name ?? 'No category', account?.name ?? 'Choose account'].join(' · ');
 
   return (
-    <div
-      className={`bg-surface rounded-xl border transition-all ${
-        item.isBatchDuplicate || item.isDbDuplicate
-          ? 'border-warning/30 bg-surface/80'
-          : item.isBalanceOnly
-          ? 'border-white/5 opacity-80'
-          : item.selected
-          ? 'border-primary/40 shadow-sm'
-          : 'border-white/5 opacity-70'
-      }`}
-    >
-      {/* Top Header Row */}
-      <div className="p-3.5 flex items-start gap-3">
-        {/* Checkbox / Selection */}
-        <div className="pt-0.5">
-          {item.isBalanceOnly ? (
-            <span
-              className="text-xs text-text-muted px-1.5 py-0.5 rounded bg-surface-light cursor-help"
-              title="Balance-only message: no transaction will be created"
-            >
-              Info
-            </span>
-          ) : (
-            <input
-              type="checkbox"
-              id={`select-${item.id}`}
-              checked={item.selected}
-              onChange={(e) => onUpdate({ ...item, selected: e.target.checked })}
-              className="w-4 h-4 rounded text-primary bg-surface-light border-white/20 focus:ring-primary focus:ring-offset-surface cursor-pointer"
-            />
-          )}
-        </div>
-
-        {/* Content Preview */}
+    <div className={cx('bg-surface rounded-card shadow-card overflow-hidden transition-opacity', !item.selected && !inactive && 'opacity-60')}>
+      <div className="flex items-start gap-3 p-4">
+        {!inactive && (
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={item.selected}
+            aria-label={item.selected ? 'Don’t save this one' : 'Save this one'}
+            onClick={() => onUpdate({ ...item, selected: !item.selected })}
+            className={cx('mt-2.5 size-6 rounded-lg shrink-0 flex items-center justify-center transition-colors', item.selected ? 'bg-grad-primary text-white' : 'bg-well text-transparent')}
+          >
+            <Check className="size-4" strokeWidth={3} />
+          </button>
+        )}
+        <CategoryIcon category={inactive ? null : category} transfer={item.action === 'transfer'} />
         <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-            <span className="text-[10px] text-text-muted font-mono">#{index + 1}</span>
-
-            {/* Source Badge */}
-            <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1 ${srcInfo.color}`}>
-              <span>{srcInfo.icon}</span>
-              <span>{srcInfo.label}</span>
-            </span>
-
-            {/* Action Badge */}
-            <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${typeBadge.color}`}>
-              {parsed.transactionType === 'atm_withdrawal'
-                ? 'ATM (Bank → Cash)'
-                : typeBadge.label}
-            </span>
-
-            {/* Confidence Badge */}
-            {parsed.confidence === 'low' && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-danger/15 text-danger font-medium">
-                Low Confidence
-              </span>
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-[15px] font-semibold text-ink truncate" dir="auto">{title}</p>
+            {item.isBalanceOnly ? (
+              <Badge>Balance info</Badge>
+            ) : (
+              <Amount piastres={piastres} tone={item.action === 'income' ? 'income' : item.action === 'transfer' ? 'transfer' : 'expense'} signed={item.action !== 'transfer'} />
             )}
           </div>
-
-          {/* Amount & Merchant / Recipient */}
-          <div className="flex items-baseline justify-between gap-2 mt-1">
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold text-sm truncate">
-                {item.merchant || (item.action === 'transfer' ? 'Account Transfer' : 'Transaction')}
-              </p>
-              {item.note && (
-                <p className="text-xs text-text-muted truncate mt-0.5">{item.note}</p>
-              )}
-            </div>
-
-            {/* Amount display */}
-            <div className="text-right shrink-0">
-              {item.isBalanceOnly ? (
-                <p className="text-xs text-text-muted font-medium">No money moved</p>
-              ) : (
-                <p className={`text-base font-bold ${
-                  item.action === 'income' ? 'text-success' :
-                  item.action === 'transfer' ? 'text-warning' : 'text-danger'
-                }`}>
-                  {item.action === 'income' ? '+' : item.action === 'transfer' ? '🔄 ' : '-'}
-                  {formatEGP(parsedAmountPiastres)}
-                </p>
-              )}
-            </div>
+          <p className="text-[13px] text-ink-3 truncate mt-0.5">{inactive ? 'Won’t be saved' : sub}</p>
+          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+            <Badge tone="brand">{SOURCE[parsed.source] ?? 'SMS'}</Badge>
+            <Badge tone={needsDate ? 'warning' : 'neutral'}>
+              {date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}, {date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            </Badge>
+            {item.hasFee && <Badge>Fee {parseFloat(item.feeEgp).toFixed(2)}</Badge>}
+            {parsed.transactionType === 'atm_withdrawal' && <Badge>ATM · bank to cash</Badge>}
+            {parsed.confidence === 'low' && <Badge tone="warning">Check details</Badge>}
           </div>
-
-          {/* Key tags & details */}
-          <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-text-muted">
-            {/* Account */}
-            <span className="inline-flex items-center gap-1 bg-surface-light px-2 py-0.5 rounded-md">
-              <span>{sourceAccount?.icon ?? '💳'}</span>
-              <span>{sourceAccount?.name ?? 'Select Account'}</span>
-              {item.action === 'transfer' && (
-                <>
-                  <span className="text-warning">→</span>
-                  <span>{toAccount?.icon ?? '💳'}</span>
-                  <span>{toAccount?.name ?? 'Select Destination'}</span>
-                </>
-              )}
-            </span>
-
-            {/* Category if expense/income */}
-            {item.action !== 'transfer' && !item.isBalanceOnly && (
-              <span className="inline-flex items-center gap-1 bg-surface-light px-2 py-0.5 rounded-md">
-                <span>{category?.icon ?? '❓'}</span>
-                <span>{category?.name ?? 'Uncategorized'}</span>
-              </span>
-            )}
-
-            {/* Date */}
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md ${
-              item.dateUnresolved ? 'bg-warning/15 text-warning font-medium' : 'bg-surface-light'
-            }`}>
-              <span>📅</span>
-              <span>{new Date(item.dateStr).toLocaleDateString()} {new Date(item.dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-              {item.dateUnresolved && <span>⚠️</span>}
-            </span>
-
-            {/* Fee badge */}
-            {item.hasFee && (
-              <span className="inline-flex items-center gap-1 bg-warning/15 text-warning px-2 py-0.5 rounded-md font-medium">
-                <span>⚡ Fee: {parseFloat(item.feeEgp).toFixed(2)} EGP</span>
-              </span>
-            )}
-
-            {/* Balance Snapshot */}
-            {parsed.balanceSnapshotPiastres !== null && (
-              <span className="inline-flex items-center gap-1 bg-surface-light px-2 py-0.5 rounded-md text-text-muted">
-                <span>📊 Balance: {formatEGP(parsed.balanceSnapshotPiastres)}</span>
-              </span>
-            )}
-
-            {/* Reference ID */}
-            {parsed.referenceId && (
-              <span className="inline-flex items-center gap-1 bg-surface-light px-2 py-0.5 rounded-md font-mono text-[11px]">
-                <span>Ref: {parsed.referenceId}</span>
-              </span>
-            )}
-          </div>
-
-          {/* Unresolved Date Alert */}
-          {item.dateUnresolved && (
-            <div className="mt-2 text-xs bg-warning/10 text-warning rounded-lg p-2 flex items-start gap-1.5">
-              <span className="shrink-0 text-sm">⚠️</span>
-              <div>
-                <p className="font-medium">Unresolved Date (Missing Year)</p>
-                <p className="opacity-90">{item.dateWarning}</p>
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(true)}
-                  className="mt-1 text-xs underline font-semibold cursor-pointer"
-                >
-                  Edit / Confirm Date
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Batch Duplicate Warning */}
-          {item.isBatchDuplicate && (
-            <div className="mt-2 text-xs bg-warning/10 text-warning rounded-lg p-2 flex items-center gap-1.5">
-              <span>⚠️</span>
-              <span>Duplicate message in this batch. Unselected by default to prevent duplicate entry.</span>
-            </div>
-          )}
-
-          {/* Database Duplicate Warning */}
-          {item.isDbDuplicate && (
-            <div className="mt-2 text-xs bg-danger/10 text-danger rounded-lg p-2 flex items-center gap-1.5">
-              <span>⚠️</span>
-              <span>{item.dbDuplicateReason || 'Already imported in your transaction history.'}</span>
-            </div>
-          )}
-
-          {/* Balance-only Explanatory Notice */}
-          {item.isBalanceOnly && (
-            <div className="mt-2 text-xs bg-surface-light text-text-muted rounded-lg p-2 flex items-center gap-1.5">
-              <span>ℹ️</span>
-              <span>Balance notification only. Penny does not record balance inquiries as income or expense.</span>
-            </div>
-          )}
-
-          {/* Action Row: Toggle Edit / View Original / Discard */}
-          <div className="flex items-center justify-between mt-3 pt-2 border-t border-white/5 text-xs">
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setIsEditing(!isEditing)}
-                className="text-primary hover:text-primary-light font-medium flex items-center gap-1 cursor-pointer"
-              >
-                <span>✏️</span>
-                <span>{isEditing ? 'Close Editing' : 'Edit Fields'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowOriginal(!showOriginal)}
-                className="text-text-muted hover:text-text font-medium flex items-center gap-1 cursor-pointer"
-              >
-                <span>💬</span>
-                <span>{showOriginal ? 'Hide Original SMS' : 'View SMS Text'}</span>
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={onRemove}
-              className="text-text-muted hover:text-danger transition-colors cursor-pointer"
-              title="Remove from review"
-            >
-              Discard
-            </button>
-          </div>
-
-          {/* Original SMS Accordion */}
-          {showOriginal && (
-            <div className="mt-2 p-2.5 bg-black/30 rounded-lg font-mono text-[11px] text-text-muted whitespace-pre-wrap break-words border border-white/5 dir-auto" dir="auto">
-              <p className="text-[10px] text-text-muted/60 uppercase font-sans mb-1 font-semibold">Original Message:</p>
-              {parsed.originalText}
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Expanded Editing Panel */}
-      {isEditing && (
-        <div className="p-3.5 bg-surface-light/40 border-t border-white/5 space-y-3">
-          <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-            Edit Parsed Fields
-          </p>
+      {(duplicate || needsDate || item.isBalanceOnly) && (
+        <div className="px-4 pb-3 space-y-2">
+          {duplicate && (
+            <p className="flex gap-2 text-[13px] text-caution bg-caution-soft rounded-xl px-3 py-2">
+              <Copy className="size-4 shrink-0 mt-px" />
+              {item.isBatchDuplicate ? 'Same message appears twice in what you pasted — this copy is unticked.' : item.dbDuplicateReason || 'Looks like this is already in your history.'}
+            </p>
+          )}
+          {needsDate && (
+            <p className="flex gap-2 text-[13px] text-caution bg-caution-soft rounded-xl px-3 py-2">
+              <AlertTriangle className="size-4 shrink-0 mt-px" />
+              {item.dateWarning}
+            </p>
+          )}
+          {item.isBalanceOnly && <p className="text-[13px] text-ink-3 px-1">A balance notice, not a payment — Penny doesn’t record it.</p>}
+        </div>
+      )}
 
-          <div className="grid grid-cols-2 gap-2.5">
-            {/* Transaction Type */}
-            <div>
-              <label className="text-[11px] text-text-muted block mb-1">Transaction Type</label>
-              <select
-                value={item.action}
-                onChange={(e) => onUpdate({ ...item, action: e.target.value as SmsReviewItem['action'] })}
-                className="w-full bg-surface border border-white/10 rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
-              >
+      <div className="flex items-center gap-1 px-2 pb-2">
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="h-9 px-3 rounded-xl text-[13px] font-semibold text-brand-700 hover:bg-brand-50 inline-flex items-center gap-1">
+          {open ? 'Hide details' : 'Edit details'} <ChevronDown className={cx('size-4 transition-transform', open && 'rotate-180')} />
+        </button>
+        <button type="button" onClick={() => setShowSms((v) => !v)} className="h-9 px-3 rounded-xl text-[13px] font-semibold text-ink-3 hover:bg-well inline-flex items-center gap-1.5">
+          <MessageSquareText className="size-4" /> {showSms ? 'Hide SMS' : 'SMS'}
+        </button>
+        <button type="button" onClick={onRemove} className="ml-auto h-9 px-3 rounded-xl text-[13px] font-semibold text-ink-3 hover:bg-well inline-flex items-center gap-1.5">
+          <X className="size-4" /> Remove
+        </button>
+      </div>
+
+      {showSms && (
+        <p dir="auto" className="mx-4 mb-4 text-sm text-ink-2 leading-relaxed bg-brand-50 rounded-2xl px-4 py-3 whitespace-pre-wrap break-words">{parsed.originalText}</p>
+      )}
+
+      {open && (
+        <div className="bg-well/50 px-4 py-4 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Type">
+              <Select value={item.action} onChange={(e) => onUpdate({ ...item, action: e.target.value as SmsReviewItem['action'] })} className="bg-surface">
                 <option value="expense">Expense</option>
                 <option value="income">Income</option>
                 <option value="transfer">Transfer</option>
-                <option value="ignore">Ignore / Informational</option>
-              </select>
-            </div>
-
-            {/* Amount */}
-            <div>
-              <label className="text-[11px] text-text-muted block mb-1">Amount (EGP)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={item.amountEgp}
-                onChange={(e) => onUpdate({ ...item, amountEgp: e.target.value })}
-                className="w-full bg-surface border border-white/10 rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
-                placeholder="0.00"
-              />
-            </div>
+                <option value="ignore">Don’t save</option>
+              </Select>
+            </Field>
+            <Field label="Amount (EGP)">
+              <TextInput type="number" inputMode="decimal" step="0.01" min="0.01" value={item.amountEgp} onChange={(e) => onUpdate({ ...item, amountEgp: e.target.value })} className="bg-surface num" />
+            </Field>
           </div>
 
-          {/* Account Selection */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
-              <label className="text-[11px] text-text-muted block mb-1">
-                {item.action === 'transfer' ? 'From Account' : 'Account'}
-              </label>
-              <select
-                value={item.accountId}
-                onChange={(e) => onUpdate({ ...item, accountId: parseInt(e.target.value, 10) })}
-                className="w-full bg-surface border border-white/10 rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
-              >
-                {accounts.map(acc => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.icon} {acc.name}
-                  </option>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={item.action === 'transfer' ? 'From' : 'Account'}>
+              <Select value={item.accountId} onChange={(e) => onUpdate({ ...item, accountId: parseInt(e.target.value, 10) })} className="bg-surface">
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
-              </select>
-            </div>
-
-            {/* Destination Account (for transfer) or Category */}
+              </Select>
+            </Field>
             {item.action === 'transfer' ? (
-              <div>
-                <label className="text-[11px] text-text-muted block mb-1">To Account (Destination)</label>
-                <select
-                  value={item.toAccountId ?? ''}
-                  onChange={(e) => onUpdate({ ...item, toAccountId: parseInt(e.target.value, 10) })}
-                  className="w-full bg-surface border border-white/10 rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
-                >
-                  <option value="">Select destination...</option>
-                  {accounts.map(acc => (
-                    <option key={acc.id} value={acc.id} disabled={acc.id === item.accountId}>
-                      {acc.icon} {acc.name} {acc.id === item.accountId ? '(Source)' : ''}
-                    </option>
+              <Field label="To">
+                <Select value={item.toAccountId ?? ''} onChange={(e) => onUpdate({ ...item, toAccountId: parseInt(e.target.value, 10) })} className="bg-surface">
+                  <option value="">Choose</option>
+                  {accounts.filter((a) => a.id !== item.accountId).map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
-                </select>
-              </div>
+                </Select>
+              </Field>
             ) : (
-              <div>
-                <label className="text-[11px] text-text-muted block mb-1">Category</label>
-                <select
-                  value={item.categoryId ?? ''}
-                  onChange={(e) => onUpdate({ ...item, categoryId: parseInt(e.target.value, 10) })}
-                  className="w-full bg-surface border border-white/10 rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
-                >
-                  {availableCategories.map(cat => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.icon} {cat.name}
-                    </option>
+              <Field label="Category">
+                <Select value={item.categoryId ?? ''} onChange={(e) => onUpdate({ ...item, categoryId: parseInt(e.target.value, 10) })} className="bg-surface" disabled={item.action === 'ignore'}>
+                  {options.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
-                </select>
-              </div>
+                </Select>
+              </Field>
             )}
           </div>
 
-          {/* Date & Time Picker */}
-          <div>
-            <label className="text-[11px] text-text-muted block mb-1">
-              Date & Time {item.dateUnresolved && <span className="text-warning font-semibold">(Please verify)</span>}
-            </label>
-            <input
-              type="datetime-local"
-              value={item.dateStr}
-              onChange={(e) => onUpdate({ ...item, dateStr: e.target.value, dateUnresolved: false })}
-              className={`w-full bg-surface border rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-primary focus:outline-none ${
-                item.dateUnresolved ? 'border-warning/50 text-warning' : 'border-white/10'
-              }`}
-            />
+          <Field label="Date and time">
+            <TextInput type="datetime-local" value={item.dateStr} onChange={(e) => onUpdate({ ...item, dateStr: e.target.value, dateUnresolved: false, dateWarning: undefined })} className="bg-surface text-sm" />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={item.action === 'income' ? 'From' : 'Paid to'}>
+              <TextInput value={item.merchant} onChange={(e) => onUpdate({ ...item, merchant: e.target.value })} className="bg-surface" dir="auto" />
+            </Field>
+            <Field label="Note">
+              <TextInput value={item.note} onChange={(e) => onUpdate({ ...item, note: e.target.value })} className="bg-surface" />
+            </Field>
           </div>
 
-          {/* Merchant / Recipient & Note */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
-              <label className="text-[11px] text-text-muted block mb-1">Merchant / Recipient</label>
-              <input
-                type="text"
-                value={item.merchant}
-                onChange={(e) => onUpdate({ ...item, merchant: e.target.value })}
-                className="w-full bg-surface border border-white/10 rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
-                placeholder="Merchant or recipient name"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] text-text-muted block mb-1">Note / Reference</label>
-              <input
-                type="text"
-                value={item.note}
-                onChange={(e) => onUpdate({ ...item, note: e.target.value })}
-                className="w-full bg-surface border border-white/10 rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
-                placeholder="Notes or ref id"
-              />
-            </div>
-          </div>
-
-          {/* Separate Fee Handling */}
           {item.hasFee && (
-            <div className="bg-surface p-2.5 rounded-lg border border-warning/20 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium">
-                  <input
-                    type="checkbox"
-                    checked={item.includeFeeAsExpense}
-                    onChange={(e) => onUpdate({ ...item, includeFeeAsExpense: e.target.checked })}
-                    className="w-3.5 h-3.5 text-warning rounded bg-surface-light border-white/20"
-                  />
-                  <span>Record separate fee expense</span>
-                </label>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={item.feeEgp}
-                    onChange={(e) => onUpdate({ ...item, feeEgp: e.target.value })}
-                    className="w-20 bg-surface-light border border-white/10 rounded px-2 py-1 text-xs text-right font-semibold"
-                  />
-                  <span className="text-xs text-text-muted">EGP</span>
-                </div>
+            <div className="rounded-2xl bg-surface p-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-ink">Save the fee as its own expense</span>
+                <Toggle label="Save fee separately" checked={item.includeFeeAsExpense} onChange={(v) => onUpdate({ ...item, includeFeeAsExpense: v })} />
               </div>
-
               {item.includeFeeAsExpense && (
-                <div>
-                  <label className="text-[10px] text-text-muted block mb-1">Fee Category</label>
-                  <select
-                    value={item.feeCategoryId ?? ''}
-                    onChange={(e) => onUpdate({ ...item, feeCategoryId: parseInt(e.target.value, 10) })}
-                    className="w-full bg-surface-light border border-white/10 rounded px-2 py-1 text-xs"
-                  >
-                    {categories.filter(c => c.type === 'expense').map(cat => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.icon} {cat.name}
-                      </option>
-                    ))}
-                  </select>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Fee (EGP)">
+                    <TextInput type="number" step="0.01" min="0" value={item.feeEgp} onChange={(e) => onUpdate({ ...item, feeEgp: e.target.value })} className="num" />
+                  </Field>
+                  <Field label="Category">
+                    <Select value={item.feeCategoryId ?? ''} onChange={(e) => onUpdate({ ...item, feeCategoryId: parseInt(e.target.value, 10) })}>
+                      {categories.filter((c) => c.type === 'expense').map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </Select>
+                  </Field>
                 </div>
               )}
             </div>
           )}
-
-          <div className="flex justify-end pt-1">
-            <button
-              type="button"
-              onClick={() => setIsEditing(false)}
-              className="text-xs bg-primary text-white px-3 py-1.5 rounded-lg font-medium cursor-pointer"
-            >
-              Done Editing
-            </button>
-          </div>
         </div>
       )}
     </div>

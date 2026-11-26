@@ -55,7 +55,7 @@ export async function handlePushPayload(raw: unknown): Promise<PushNotice | null
 
   if (data.kind === 'test') {
     return {
-      title: 'Penny ✅',
+      title: 'Penny · Automatic import is on',
       body: 'الاستيراد التلقائي شغال. أي رسالة بنك هتتسجل لوحدها.',
       page: 'import',
       tag: 'penny-test',
@@ -82,7 +82,7 @@ export async function handlePushPayload(raw: unknown): Promise<PushNotice | null
     const who = result.counterparty ? ` · ${result.counterparty}` : '';
     const first = `${sign}${egp(result.amountPiastres)}${who}`;
     return {
-      title: result.action === 'income' ? 'Penny · فلوس دخلت 💰' : result.action === 'transfer' ? 'Penny · تحويل 🔄' : 'Penny · مصروف جديد',
+      title: result.action === 'income' ? 'Penny · فلوس دخلت' : result.action === 'transfer' ? 'Penny · تحويل' : 'Penny · مصروف جديد',
       body:
         uncategorized > 0
           ? `${first}\nعندك ${uncategorized} ${uncategorized === 1 ? 'معاملة' : 'معاملات'} من غير تصنيف — ادخل ظبطها.`

@@ -29,9 +29,10 @@ export function stripBidiMarks(text: string): string {
  * Turn a year-less "DD-MM" / "DD/MM" (optionally followed by HH:MM) into a
  * real date, using when the SMS arrived as the anchor.
  *
- * Because RTL text can arrive with the two numbers swapped, both day-month
- * and month-day readings are tried (only valid calendar dates), across the
- * anchor's year and its neighbours, and the one closest to the anchor wins.
+ * Day-month is assumed. Because RTL text can arrive with the two numbers
+ * swapped, month-day is tried only when day-month is not a valid date. The
+ * year is the one (anchor's, or a neighbour) that puts the date closest to
+ * the anchor without being in the future.
  * Returns null if no valid reading exists.
  */
 export function resolveYearlessDate(raw: string, anchor: Date): Date | null {
@@ -48,17 +49,15 @@ export function resolveYearlessDate(raw: string, anchor: Date): Date | null {
   }
   const a = parseInt(dm[1], 10);
   const b = parseInt(dm[2], 10);
-  const readings: Array<[number, number]> = [[a, b]]; // [day, month]
-  if (a !== b) readings.push([b, a]);
 
-  let best: Date | null = null;
-  let bestDiff = Infinity;
-  for (const [day, month] of readings) {
-    if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+  // Closest valid date for a given (day, month), never more than a day ahead.
+  const closest = (day: number, month: number): Date | null => {
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    let best: Date | null = null;
+    let bestDiff = Infinity;
     for (const year of [anchor.getFullYear() - 1, anchor.getFullYear(), anchor.getFullYear() + 1]) {
       const d = new Date(year, month - 1, day, hours, minutes);
       if (d.getMonth() !== month - 1) continue; // e.g. 31 February
-      // A message can't describe something far in the future; allow a day of clock skew.
       const diff = d.getTime() - anchor.getTime();
       if (diff > 24 * 60 * 60 * 1000) continue;
       if (Math.abs(diff) < bestDiff) {
@@ -66,7 +65,13 @@ export function resolveYearlessDate(raw: string, anchor: Date): Date | null {
         best = d;
       }
     }
-  }
+    return best;
+  };
+
+  // Egyptian SMS are day-month. Only when that reading is impossible
+  // (e.g. "11-26", whose numbers were reversed by RTL marks) is the
+  // swapped month-day reading used.
+  const best = closest(a, b) ?? (a !== b ? closest(b, a) : null);
   return best;
 }
 

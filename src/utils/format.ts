@@ -84,3 +84,8 @@ export function parseLocalDateInput(s: string): Date {
   const [y, m, d] = s.split('-').map(Number);
   return new Date(y, m - 1, d);
 }
+
+/** Whole pounds with grouping, no currency or decimals — for tight summary tiles. */
+export function formatWhole(piastres: number): string {
+  return Math.round(piastres / 100).toLocaleString('en-US');
+}
