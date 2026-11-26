@@ -7,6 +7,7 @@
  * All operations are local-first with zero external dependencies.
  */
 
+import { resolveYearlessDate } from './parserUtils';
 import { db } from '../../db';
 import type { Account, Category } from '../../types';
 import type { ParsedSMS } from '../../types/sms';
@@ -111,25 +112,8 @@ export function toInputDateTime(d: Date): string {
  * Egyptian SMS dates: DD/MM or DD-MM.
  */
 export function resolveDateWithYear(rawDateStr: string, fallbackYear: number): Date {
-  const normalized = rawDateStr.replace(/[٠-٩]/g, c => String(c.charCodeAt(0) - 0x0660));
-
-  let hours = 12;
-  let minutes = 0;
-  const timeMatch = normalized.match(/(\d{1,2}):(\d{2})/);
-  if (timeMatch) {
-    hours = parseInt(timeMatch[1], 10);
-    minutes = parseInt(timeMatch[2], 10);
-  }
-
-  // Check DD/MM or DD-MM
-  const matchSlash = normalized.match(/(\d{1,2})[/-](\d{1,2})/);
-  if (matchSlash) {
-    const day = parseInt(matchSlash[1], 10);
-    const month = parseInt(matchSlash[2], 10) - 1;
-    return new Date(fallbackYear, month, day, hours, minutes);
-  }
-
-  return new Date();
+  // Anchor at the end of the given year so every reading in that year is allowed.
+  return resolveYearlessDate(rawDateStr, new Date(fallbackYear, 11, 31, 23, 59)) ?? new Date();
 }
 
 /**
@@ -350,16 +334,13 @@ export function createReviewItem(
     dateUnresolved = false;
   } else if (parsed.date?.yearMissing) {
     dateUnresolved = true;
-    let year = now.getFullYear();
-    let resolved = resolveDateWithYear(parsed.date.raw, year);
-    // An SMS can't come from the future: e.g. "28/12" pasted on 2 January
-    // belongs to last year.
-    if (resolved.getTime() > now.getTime() + 24 * 60 * 60 * 1000) {
-      year -= 1;
-      resolved = resolveDateWithYear(parsed.date.raw, year);
+    const resolved = resolveYearlessDate(parsed.date.raw, now);
+    if (resolved) {
+      dateStr = toInputDateTime(resolved);
+      dateWarning = `Missing year in SMS ('${parsed.date.raw}'). Year set to ${resolved.getFullYear()} — please verify.`;
+    } else {
+      dateWarning = `Could not read the SMS date ('${parsed.date.raw}'). Defaulted to the receive time.`;
     }
-    dateStr = toInputDateTime(resolved);
-    dateWarning = `Missing year in SMS ('${parsed.date.raw}'). Year defaulted to ${year} — please verify.`;
   } else if (parsed.date === null) {
     dateUnresolved = true;
     dateWarning = 'No date found in SMS. Defaulted to current time.';

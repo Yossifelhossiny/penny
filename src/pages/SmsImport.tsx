@@ -11,6 +11,7 @@ import {
 } from '../services/sms/smsImportService';
 import { SmsReviewCard } from '../components/sms/SmsReviewCard';
 import { SmsInboxSync } from '../components/sms/SmsInboxSync';
+import { AutoImportCard } from '../components/settings/AutoImportCard';
 import { reviewItemsForEntry, markInboxEntryResolved } from '../services/sms/smsInboxService';
 import { formatEGP } from '../utils/format';
 
@@ -284,6 +285,7 @@ export function SmsImport({ onNavigate }: Props) {
       {reviewItems.length === 0 && !saveSuccess && (
         <div className="space-y-4">
           {/* iPhone Shortcut inbox */}
+          <AutoImportCard />
           <SmsInboxSync onReview={handleReviewInboxEntry} />
 
           {/* Paste Card */}

@@ -52,6 +52,10 @@ export interface InboxEntryResult {
   text: string;
   entryId?: number;
   transactionIds?: number[];
+  /** For saved entries — used to word the notification. */
+  amountPiastres?: number | null;
+  action?: SmsReviewItem['action'];
+  counterparty?: string;
 }
 
 export interface InboxImportSummary {
@@ -240,7 +244,14 @@ export function assessForAutoSave(
  * entry is handled in its own IndexedDB transaction.
  */
 export async function importSmsInbox(fileText: string): Promise<InboxImportSummary> {
-  const entries = parseInboxFile(fileText);
+  return importSmsEntries(parseInboxFile(fileText));
+}
+
+/**
+ * Process already-split entries (from the inbox file, or one SMS pushed by
+ * the Shortcut through the service worker). Same guarantees as above.
+ */
+export async function importSmsEntries(entries: InboxFileEntry[]): Promise<InboxImportSummary> {
   const summary: InboxImportSummary = {
     total: entries.length,
     alreadyProcessed: 0,
@@ -316,6 +327,10 @@ async function processOneEntry(entry: InboxFileEntry, entryKey: string): Promise
 
   if (decision.status === 'auto') {
     item.selected = true;
+    // Automatic saves go under "Uncategorized"; you pick the real category later.
+    if (item.action === 'income' || item.action === 'expense') {
+      item.categoryId = await ensureUncategorizedCategory(item.action);
+    }
     const res = await saveConfirmedReviewItems([item]);
     if (res.errors.length > 0 || res.transactionIds.length === 0) {
       // Throwing aborts the IndexedDB transaction, so nothing half-saved remains.
@@ -341,7 +356,38 @@ async function processOneEntry(entry: InboxFileEntry, entryKey: string): Promise
     updatedAt: now,
   });
 
-  return { status, reason, text: entry.text, entryId: entryId as number, transactionIds };
+  return {
+    status,
+    reason,
+    text: entry.text,
+    entryId: entryId as number,
+    transactionIds,
+    amountPiastres: parsed.amountPiastres,
+    action: item.action,
+    counterparty: item.merchant || undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Uncategorized
+// ---------------------------------------------------------------------------
+
+export const UNCATEGORIZED_NAME = 'Uncategorized';
+
+/** Id of the "Uncategorized" category of this type, created if missing. */
+export async function ensureUncategorizedCategory(type: 'income' | 'expense'): Promise<number> {
+  const found = (await db.categories.where('name').equals(UNCATEGORIZED_NAME).toArray()).find(c => c.type === type);
+  if (found?.id) return found.id;
+  return (await db.categories.add({ name: UNCATEGORIZED_NAME, icon: '❓', type, color: '#94a3b8' })) as number;
+}
+
+/** How many income/expense transactions still have no real category. */
+export async function countUncategorizedTransactions(): Promise<number> {
+  const ids = (await db.categories.where('name').equals(UNCATEGORIZED_NAME).toArray())
+    .map(c => c.id)
+    .filter((id): id is number => id != null);
+  if (ids.length === 0) return 0;
+  return db.transactions.where('categoryId').anyOf(ids).count();
 }
 
 // ---------------------------------------------------------------------------

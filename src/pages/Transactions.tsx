@@ -9,9 +9,12 @@ import type { Transaction, TransactionType, Page } from '../types';
 
 interface Props {
   onNavigate?: (page: Page) => void;
+  /** Opened from the "uncategorized" notification. */
+  initialFilter?: 'uncategorized';
 }
 
-export function Transactions({ onNavigate }: Props) {
+export function Transactions({ onNavigate, initialFilter }: Props) {
+  const [onlyUncategorized, setOnlyUncategorized] = useState(initialFilter === 'uncategorized');
   const [showForm, setShowForm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [editingTxn, setEditingTxn] = useState<Transaction | null>(null);
@@ -25,7 +28,14 @@ export function Transactions({ onNavigate }: Props) {
     []
   );
 
+  const uncategorizedIds = useLiveQuery(
+    async () => (await db.categories.where('name').equals('Uncategorized').toArray()).map(c => c.id!),
+    []
+  );
+  const uncategorizedCount = transactions?.filter(t => t.categoryId != null && uncategorizedIds?.includes(t.categoryId)).length ?? 0;
+
   const filtered = transactions?.filter(t => {
+    if (onlyUncategorized && !(t.categoryId != null && uncategorizedIds?.includes(t.categoryId))) return false;
     if (filterType !== 'all' && t.type !== filterType) return false;
     if (filterAccount !== 'all' &&
       t.accountId !== filterAccount &&
@@ -93,6 +103,19 @@ export function Transactions({ onNavigate }: Props) {
           </button>
         ))}
       </div>
+
+      {/* Uncategorized (auto-imported SMS waiting for a category) */}
+      {(uncategorizedCount > 0 || onlyUncategorized) && (
+        <button
+          onClick={() => setOnlyUncategorized(v => !v)}
+          className={`w-full text-left text-xs px-3 py-2 rounded-lg font-medium transition-colors ${
+            onlyUncategorized ? 'bg-warning/20 text-warning' : 'bg-warning/10 text-warning/90'
+          }`}
+        >
+          ❓ {uncategorizedCount} {uncategorizedCount === 1 ? 'transaction needs' : 'transactions need'} a category
+          {onlyUncategorized ? ' · tap a transaction → Edit · show all' : ' · show them'}
+        </button>
+      )}
 
       {/* Account filter */}
       {accounts && accounts.length > 1 && (

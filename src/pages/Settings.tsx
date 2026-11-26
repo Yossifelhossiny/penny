@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
 import type { Page } from '../types';
 import { BackupExport } from '../components/settings/BackupExport';
+import { AutoImportCard } from '../components/settings/AutoImportCard';
 
 export function Settings({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   const txnCount = useLiveQuery(() => db.transactions.count());
@@ -21,6 +22,7 @@ export function Settings({ onNavigate }: { onNavigate?: (page: Page) => void }) 
   return (
     <div className="p-4 space-y-4">
       <h2 className="text-lg font-semibold">Settings</h2>
+      <AutoImportCard />
       <div className="bg-surface rounded-xl p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div>

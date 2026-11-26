@@ -12,7 +12,7 @@ import type { ParsedSMS, SmsSource } from '../../types/sms';
 import * as genericBankParser from './genericBankParser';
 import * as instaPayParser from './instaPayParser';
 import * as vodafoneCashParser from './vodafoneCashParser';
-import { normalizeArabicNumerals } from './parserUtils';
+import { normalizeArabicNumerals, stripBidiMarks } from './parserUtils';
 
 /**
  * Detect which SMS source a message is from.
@@ -30,7 +30,8 @@ export function detectSource(text: string): SmsSource {
  * Returns a ParsedSMS for user review — does NOT save to DB.
  */
 export function parseSms(text: string): ParsedSMS {
-  const trimmed = text.trim();
+  // Invisible RTL/LTR marks change the stored order of numbers; drop them.
+  const trimmed = stripBidiMarks(text).trim();
   const source = detectSource(trimmed);
 
   switch (source) {

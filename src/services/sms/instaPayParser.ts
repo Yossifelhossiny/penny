@@ -13,6 +13,20 @@
 import type { ParsedSMS, SmsTransactionType, SmsDirection } from '../../types/sms';
 import { amountToPiastres, normalizeArabicNumerals, parseSmsDate, buildFingerprint } from './parserUtils';
 
+/** Wording used by Egyptian banks / InstaPay for money coming IN. */
+const INBOUND_RE = new RegExp(
+  [
+    '(?:تم\\s*)?(?:إضاف|اضاف|أضاف|أضيف|اضيف)', // تم إضافة / تمت اضافة / أضيف
+    'تم\\s*(?:استلام|استقبال|إيداع|ايداع)',
+    '(?:إلى|الى|ل)\\s*(?:بطاقتك|حسابك)', // ... إلى بطاقتكم / لحسابكم (yours)
+    'transfer\\s*received',
+    'received\\s+(?:an?\\s+)?(?:instapay|transfer)',
+    'credited',
+    'added\\s+to',
+  ].join('|'),
+  'i'
+);
+
 export function canParse(text: string): boolean {
   const normalized = normalizeArabicNumerals(text);
   if (/تحويل لحظي|instapay/i.test(normalized)) return true;
@@ -28,12 +42,14 @@ export function parse(text: string): ParsedSMS {
   let transactionType: SmsTransactionType = 'unknown';
   let direction: SmsDirection = null;
 
-  if (/تم تنفيذ تحويل|transfer\s*sent|تحويل.*من\s*بطاقت/i.test(text)) {
-    transactionType = 'transfer_out';
-    direction = 'outbound';
-  } else if (/تم استلام|transfer\s*received|تم استقبال/i.test(text)) {
+  // Incoming wording is checked first: "تم إضافة تحويل لحظي ... إلى بطاقتكم"
+  // also contains "تحويل", so the outgoing patterns must not win.
+  if (INBOUND_RE.test(text)) {
     transactionType = 'transfer_in';
     direction = 'inbound';
+  } else if (/تم تنفيذ تحويل|transfer\s*sent|تحويل.*من\s*(?:بطاقت|حساب)|sent\s+to/i.test(text)) {
+    transactionType = 'transfer_out';
+    direction = 'outbound';
   }
 
   // Extract amount: "بمبلغ 45.00 جم" or "amount 45.00 EGP"
@@ -69,12 +85,17 @@ export function parse(text: string): ParsedSMS {
       if (recipientEn) recipient = recipientEn[1].trim();
     }
   } else if (direction === 'inbound') {
-    // "من محمد ك*** ع****"
-    const senderMatch = text.match(/من\s+(.+?)(?:\s+بمبلغ|\s+رقم|\s+يوم|\s*$)/);
-    if (senderMatch) {
-      sender = senderMatch[1].trim();
-      // Don't confuse "من بطاقتكم" (from your card) with a sender name
-      if (/بطاقت/.test(sender)) sender = null;
+    // "من محمد ك*** ع****" — skip "من بطاقتكم"/"من حسابكم" (that's you)
+    for (const m of text.matchAll(/من\s+(.+?)(?=\s+(?:إلى|الى|بمبلغ|رقم|يوم|بتاريخ)|\s*$)/g)) {
+      const name = m[1].trim();
+      if (!/بطاقت|حساب/.test(name)) {
+        sender = name;
+        break;
+      }
+    }
+    if (!sender) {
+      const senderEn = text.match(/from\s+(.+?)(?:\s+ref|\s+on|\s+to|\s*$)/i);
+      if (senderEn) sender = senderEn[1].trim();
     }
   }
 

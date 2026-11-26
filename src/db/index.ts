@@ -8,7 +8,25 @@ const db = new Dexie('PennyDB') as Dexie & {
   budgets: EntityTable<Budget, 'id'>;
   goals: EntityTable<SavingsGoal, 'id'>;
   smsInbox: EntityTable<SmsInboxEntry, 'id'>;
+  meta: EntityTable<MetaEntry, 'key'>;
 };
+
+/** Small key-value store (e.g. the automatic-import push settings). */
+export interface MetaEntry {
+  key: string;
+  value: unknown;
+}
+
+// v5 -> v6: add meta (key-value settings readable by the service worker)
+db.version(6).stores({
+  accounts: '++id, name, type',
+  transactions: '++id, type, categoryId, accountId, toAccountId, date, smsFingerprint, referenceId',
+  categories: '++id, name, type',
+  budgets: '++id, categoryId, monthKey',
+  goals: '++id, name, targetDate',
+  smsInbox: '++id, &entryKey, status, receivedAt',
+  meta: '&key',
+});
 
 // v4 -> v5: add smsInbox (iOS Shortcut auto-import log + pending queue)
 db.version(5).stores({
