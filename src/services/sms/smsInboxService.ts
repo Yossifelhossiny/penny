@@ -56,6 +56,10 @@ export interface InboxEntryResult {
   amountPiastres?: number | null;
   action?: SmsReviewItem['action'];
   counterparty?: string;
+  /** Person on the other side of an InstaPay / wallet transfer. */
+  personName?: string;
+  /** Set when the category came from a rule (so the notification can say where it went). */
+  categoryName?: string;
 }
 
 export interface InboxImportSummary {
@@ -268,7 +272,7 @@ export async function importSmsEntries(entries: InboxFileEntry[]): Promise<Inbox
     try {
       const result = await db.transaction(
         'rw',
-        [db.smsInbox, db.transactions, db.accounts, db.categories],
+        [db.smsInbox, db.transactions, db.accounts, db.categories, db.categoryRules, db.people],
         async () => await processOneEntry(entry, entryKey)
       );
       summary.results.push(result);
@@ -303,6 +307,7 @@ async function processOneEntry(entry: InboxFileEntry, entryKey: string): Promise
   // IndexedDB transaction early.
   const accounts = await db.accounts.toArray();
   const categories = await db.categories.toArray();
+  const rules = await db.categoryRules.toArray();
   const parsed = parseSms(entry.text);
   const referenceDate = entry.receivedAt ?? new Date();
 
@@ -318,7 +323,7 @@ async function processOneEntry(entry: InboxFileEntry, entryKey: string): Promise
     };
   }
   const dbDupe = parsed.source === 'unknown' ? { isDuplicate: false } : await checkDatabaseDuplicate(parsedForDupCheck);
-  const item = createReviewItem(parsed, accounts, categories, 0, new Set(), dbDupe, referenceDate);
+  const item = createReviewItem(parsed, accounts, categories, 0, new Set(), dbDupe, referenceDate, rules);
   const decision = assessForAutoSave(item, dbDupe, entry.receivedAt);
 
   let status: SmsInboxStatus;
@@ -327,11 +332,13 @@ async function processOneEntry(entry: InboxFileEntry, entryKey: string): Promise
 
   if (decision.status === 'auto') {
     item.selected = true;
-    // Automatic saves go under "Uncategorized"; you pick the real category later.
-    if (item.action === 'income' || item.action === 'expense') {
+    // If Penny knows this merchant/person (a rule you taught it, or a known
+    // merchant), it files the transaction there. Otherwise it goes under
+    // "Uncategorized" for you to sort later.
+    if ((item.action === 'income' || item.action === 'expense') && item.categorySource === 'default') {
       item.categoryId = await ensureUncategorizedCategory(item.action);
     }
-    const res = await saveConfirmedReviewItems([item]);
+    const res = await saveConfirmedReviewItems([item], { learn: false });
     if (res.errors.length > 0 || res.transactionIds.length === 0) {
       // Throwing aborts the IndexedDB transaction, so nothing half-saved remains.
       throw new Error(res.errors[0] ?? 'Could not save transaction');
@@ -364,7 +371,9 @@ async function processOneEntry(entry: InboxFileEntry, entryKey: string): Promise
     transactionIds,
     amountPiastres: parsed.amountPiastres,
     action: item.action,
-    counterparty: item.merchant || undefined,
+    counterparty: item.personName || item.merchant || undefined,
+    personName: item.personName,
+    categoryName: item.categorySource !== 'default' ? categories.find((c) => c.id === item.categoryId)?.name : undefined,
   };
 }
 

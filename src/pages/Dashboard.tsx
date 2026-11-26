@@ -7,6 +7,9 @@ import { getCategorySpendingBreakdown, type CategorySpendingItem } from '../serv
 import { getOverallBudgetProgress, getActiveSpendingAlerts, type OverallBudgetProgress, type SpendingAlert } from '../services/budgets';
 import { getRecentMonthlyTotals, type MonthTotals } from '../services/periods';
 import { findMisdatedTransactions, type DateSuggestion } from '../services/dateAudit';
+import { getAdvice, type Advice } from '../services/advice';
+import { isStoragePersisted } from '../services/storageSafety';
+import { AdviceList } from '../components/dashboard/AdviceList';
 import { countUncategorizedTransactions } from '../services/sms/smsInboxService';
 import { useMonthSelection } from '../hooks/useMonthSelection';
 import { monthLabel } from '../utils/months';
@@ -46,6 +49,7 @@ export function Dashboard({ onNavigate, onAdd, onOpenUncategorized }: Props) {
   const [alerts, setAlerts] = useState<SpendingAlert[]>([]);
   const [uncategorized, setUncategorized] = useState(0);
   const [misdated, setMisdated] = useState<DateSuggestion[]>([]);
+  const [advice, setAdvice] = useState<Advice[]>([]);
   const [showDateFix, setShowDateFix] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
 
@@ -71,6 +75,7 @@ export function Dashboard({ onNavigate, onAdd, onOpenUncategorized }: Props) {
     getActiveSpendingAlerts(year, month).then(keep(setAlerts));
     countUncategorizedTransactions().then(keep(setUncategorized));
     findMisdatedTransactions().then(keep(setMisdated));
+    isStoragePersisted().then((p) => getAdvice({ storagePersisted: p })).then(keep(setAdvice));
     return () => {
       cancelled = true;
     };
@@ -172,6 +177,22 @@ export function Dashboard({ onNavigate, onAdd, onOpenUncategorized }: Props) {
               </button>
             ))}
           </Card>
+        </Section>
+      )}
+
+      {/* Warnings (based on common money guidelines) */}
+      {advice.length > 0 && (
+        <Section
+          title="Heads up"
+          action={
+            advice.length > 3 ? (
+              <button type="button" onClick={() => onNavigate('reports')} className="text-[13px] font-semibold text-brand-700">
+                All {advice.length}
+              </button>
+            ) : undefined
+          }
+        >
+          <AdviceList items={advice.slice(0, 3)} onNavigate={onNavigate} showBasis={false} />
         </Section>
       )}
 

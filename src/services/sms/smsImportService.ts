@@ -9,7 +9,9 @@
 
 import { resolveYearlessDate } from './parserUtils';
 import { db } from '../../db';
-import type { Account, Category } from '../../types';
+import type { Account, Category, CategoryRule } from '../../types';
+import { getRules, learnCategory, matchCategory } from '../categoryRules';
+import { findOrCreatePerson, looksLikePersonName } from '../people';
 import type { ParsedSMS } from '../../types/sms';
 import { parseSms, findDuplicateIndices } from './smsParserService';
 import { addIncome, addExpense, addTransfer } from '../transactions';
@@ -27,6 +29,10 @@ export interface SmsReviewItem {
   accountId: number;
   toAccountId?: number; // for transfers
   categoryId?: number; // for income/expense
+  /** Where the category came from: a rule you taught Penny, a built-in merchant rule, or the default. */
+  categorySource?: 'user-rule' | 'builtin-rule' | 'default';
+  /** Name of the person on the other side (InstaPay / wallet transfers). */
+  personName?: string;
   merchant: string;
   note: string;
 
@@ -243,7 +249,9 @@ export function createReviewItem(
    * in a missing year and as the time for SMS that carry no date at all.
    * Defaults to now (manual paste).
    */
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  /** Learned + built-in category rules (see categoryRules.ts). */
+  rules: CategoryRule[] = []
 ): SmsReviewItem {
   // Find accounts
   const bankAccount = accounts.find(a => a.type === 'bank') ?? accounts[0];
@@ -316,6 +324,21 @@ export function createReviewItem(
     }
   }
 
+  // Person on the other side of a P2P transfer (InstaPay / wallet).
+  const isP2P = parsed.transactionType === 'transfer_in' || parsed.transactionType === 'transfer_out';
+  const counterparty = parsed.transactionType === 'transfer_in' ? parsed.sender : parsed.transactionType === 'transfer_out' ? parsed.recipient : null;
+  const personName = isP2P ? (looksLikePersonName(counterparty) ? counterparty : parsed.phoneNumber || undefined) ?? undefined : undefined;
+
+  // A rule you taught Penny (or a known merchant) decides the category.
+  let categorySource: SmsReviewItem['categorySource'] = 'default';
+  if (action === 'income' || action === 'expense') {
+    const match = matchCategory(parsed.merchant || counterparty || parsed.recipient || parsed.sender, action, rules, categories);
+    if (match) {
+      defaultCategoryId = match.categoryId;
+      categorySource = match.source === 'user' ? 'user-rule' : 'builtin-rule';
+    }
+  }
+
   // Find fee category
   const expenseCats = categories.filter(c => c.type === 'expense');
   const billsCat = expenseCats.find(c => c.name.toLowerCase().includes('bills'));
@@ -381,6 +404,8 @@ export function createReviewItem(
     accountId: defaultAccount?.id ?? 0,
     toAccountId,
     categoryId: defaultCategoryId,
+    categorySource,
+    personName,
     merchant,
     note,
     dateStr,
@@ -411,6 +436,7 @@ export async function processSmsBatch(
 
   // Parse each message locally
   const parsedBatch = messages.map(msg => parseSms(msg));
+  const rules = await getRules();
 
   // Check batch duplicates
   const batchDupeIndices = findDuplicateIndices(parsedBatch);
@@ -420,7 +446,7 @@ export async function processSmsBatch(
   for (let i = 0; i < parsedBatch.length; i++) {
     const parsed = parsedBatch[i];
     const dbDupe = await checkDatabaseDuplicate(parsed);
-    items.push(createReviewItem(parsed, accounts, categories, i, batchDupeIndices, dbDupe, referenceDate));
+    items.push(createReviewItem(parsed, accounts, categories, i, batchDupeIndices, dbDupe, referenceDate, rules));
   }
 
   return items;
@@ -481,7 +507,13 @@ export function validateReviewItem(item: SmsReviewItem): string | null {
  * Preserves original SMS text.
  */
 export async function saveConfirmedReviewItems(
-  items: SmsReviewItem[]
+  items: SmsReviewItem[],
+  /**
+   * learn: remember the category you chose for this merchant/person so the next
+   * SMS from them is filed automatically (manual review). The automatic inbox
+   * path passes false — its category already came from a rule.
+   */
+  options: { learn?: boolean } = {}
 ): Promise<{
   savedCount: number;
   feeCount: number;
@@ -508,6 +540,13 @@ export async function saveConfirmedReviewItems(
       const originalSms = item.parsed.originalText;
       const smsFingerprint = item.parsed.fingerprint;
       const referenceId = item.parsed.referenceId || undefined;
+      const personId =
+        item.personName && (item.action === 'income' || item.action === 'expense')
+          ? await findOrCreatePerson(item.personName, item.parsed.phoneNumber || undefined)
+          : undefined;
+      if (options.learn !== false && item.merchant && item.categoryId && (item.action === 'income' || item.action === 'expense')) {
+        await learnCategory(item.merchant, item.action, item.categoryId);
+      }
 
       if (item.action === 'income') {
         transactionIds.push(await addIncome({
@@ -520,6 +559,7 @@ export async function saveConfirmedReviewItems(
           originalSms,
           smsFingerprint,
           referenceId,
+          personId,
         }));
         savedCount++;
       } else if (item.action === 'expense') {
@@ -533,6 +573,7 @@ export async function saveConfirmedReviewItems(
           originalSms,
           smsFingerprint,
           referenceId,
+          personId,
         }));
         savedCount++;
       } else if (item.action === 'transfer') {

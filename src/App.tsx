@@ -10,10 +10,14 @@ import { SmsImport } from './pages/SmsImport';
 import { Budgets } from './pages/Budgets';
 import { Reports } from './pages/Reports';
 import { Categories } from './pages/Categories';
+import { People } from './pages/People';
+import { runRecurringIncome } from './services/recurring';
+import { requestPersistentStorage } from './services/storageSafety';
+import { useToday } from './hooks/useToday';
 import { AddTransactionForm, type EntryMode } from './components/transactions/AddTransactionForm';
 import { PennyMark } from './components/layout/PennyMark';
 
-const PAGES: Page[] = ['dashboard', 'transactions', 'accounts', 'settings', 'import', 'budgets', 'reports', 'categories'];
+const PAGES: Page[] = ['dashboard', 'transactions', 'accounts', 'settings', 'import', 'budgets', 'reports', 'categories', 'people'];
 
 /** Page/filter from a notification tap: /?page=transactions&filter=uncategorized */
 function readDeepLink(): { page: Page; filter?: 'uncategorized' } {
@@ -31,9 +35,19 @@ function App() {
   const [ready, setReady] = useState(false);
   const [adding, setAdding] = useState<EntryMode | null>(null);
 
+  const today = useToday();
+
   useEffect(() => {
     seedDefaults().then(() => setReady(true));
+    // Ask iPhone to keep Penny's data even when storage runs low.
+    requestPersistentStorage();
   }, []);
+
+  // Record automatic monthly income when it's due — on open, on return to the
+  // app, and when the date changes while it's open.
+  useEffect(() => {
+    if (ready) runRecurringIncome().catch((err) => console.error('[penny] recurring income', err));
+  }, [ready, today]);
 
   // The service worker asks us to open a page when a notification is tapped.
   useEffect(() => {
@@ -72,12 +86,13 @@ function App() {
   const pageContent: Record<Page, React.ReactNode> = {
     dashboard: <Dashboard onNavigate={navigate} onAdd={setAdding} onOpenUncategorized={openUncategorized} />,
     transactions: <Transactions key={txnFilter.nonce} onNavigate={navigate} initialFilter={txnFilter.value} />,
-    accounts: <Accounts />,
+    accounts: <Accounts onNavigate={navigate} />,
     settings: <Settings onNavigate={navigate} />,
     import: <SmsImport onNavigate={navigate} />,
     budgets: <Budgets onNavigate={navigate} />,
     reports: <Reports onNavigate={navigate} />,
     categories: <Categories onNavigate={navigate} />,
+    people: <People onNavigate={navigate} />,
   };
 
   return (

@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { ArrowLeft, CalendarClock, Inbox, Lock, Shapes, Target, Trash2 } from 'lucide-react';
+import { ArrowLeft, CalendarClock, HandCoins, Inbox, Lock, Shapes, Target, Trash2 } from 'lucide-react';
 import { db } from '../db';
 import type { Page } from '../types';
 import { findMisdatedTransactions, type DateSuggestion } from '../services/dateAudit';
 import { BackupExport } from '../components/settings/BackupExport';
 import { AutoImportCard } from '../components/settings/AutoImportCard';
 import { DateFixSheet } from '../components/settings/DateFixSheet';
+import { MonthlyIncomeCard } from '../components/settings/MonthlyIncomeCard';
+import { DataSafetyCard } from '../components/settings/DataSafetyCard';
 import { PennyMark } from '../components/layout/PennyMark';
 import { Card, ConfirmSheet, IconButton, ListRow, PageHeader, Section } from '../components/ui';
 
@@ -38,11 +40,13 @@ export function Settings({ onNavigate }: { onNavigate?: (page: Page) => void }) 
       />
 
       <AutoImportCard />
+      <MonthlyIncomeCard />
 
       {onNavigate && (
         <Section title="Organise">
           <Card padded={false} className="py-1.5">
             <ListRow icon={<Inbox />} label="Import SMS" detail={pendingSms > 0 ? `${pendingSms} waiting for review` : 'Paste or sync bank messages'} onClick={() => onNavigate('import')} />
+            <ListRow icon={<HandCoins />} label="People & debts" detail="Who sent you money, who owes whom" onClick={() => onNavigate('people')} />
             <ListRow icon={<Shapes />} label="Categories" detail={`${categoryCount ?? 0} categories`} onClick={() => onNavigate('categories')} />
             <ListRow
               icon={<Target />}
@@ -53,6 +57,8 @@ export function Settings({ onNavigate }: { onNavigate?: (page: Page) => void }) 
           </Card>
         </Section>
       )}
+
+      <DataSafetyCard />
 
       <Section title="Your data">
         <Card padded={false} className="py-1.5">

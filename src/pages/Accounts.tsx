@@ -1,21 +1,28 @@
 import { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { ChevronRight, Plus, Wallet } from 'lucide-react';
+import { ChevronRight, HandCoins, Plus, Wallet } from 'lucide-react';
+import type { Page } from '../types';
+import { debtOutstanding } from '../services/people';
 import { db } from '../db';
 import { getAllBalances } from '../services/transactions';
 import { AccountDetailView } from '../components/accounts/AccountDetailView';
 import { AccountFormModal } from '../components/accounts/AccountFormModal';
 import { AccountIcon, Amount, Button, Card, EmptyState, PageHeader, Section } from '../components/ui';
+import { formatEGP } from '../utils/format';
 
 const TYPE_LABEL: Record<string, string> = { bank: 'Bank', vodafone_cash: 'Mobile wallet', cash: 'Cash' };
 
-export function Accounts() {
+export function Accounts({ onNavigate }: { onNavigate?: (p: Page) => void }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [balances, setBalances] = useState<Map<number, number>>(new Map());
 
   const accounts = useLiveQuery(() => db.accounts.toArray());
   const allTxns = useLiveQuery(() => db.transactions.toArray());
+  const debts = useLiveQuery(() => db.debts.where('status').equals('open').toArray()) ?? [];
+  const peopleCount = useLiveQuery(() => db.people.count()) ?? 0;
+  const owedToYou = debts.filter((d) => d.direction === 'lent').reduce((s, d) => s + debtOutstanding(d), 0);
+  const youOwe = debts.filter((d) => d.direction === 'borrowed').reduce((s, d) => s + debtOutstanding(d), 0);
 
   useEffect(() => {
     if (allTxns === undefined) return;
@@ -102,6 +109,23 @@ export function Accounts() {
           </Card>
         )}
       </Section>
+
+      {onNavigate && (
+        <Section title="People & debts">
+          <Card className="cursor-pointer" onClick={() => onNavigate('people')}>
+            <div className="flex items-center gap-3.5">
+              <span className="size-11 rounded-[14px] bg-grad-soft text-brand-700 flex items-center justify-center shrink-0">
+                <HandCoins className="size-5" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[15px] font-semibold text-ink">{peopleCount} {peopleCount === 1 ? 'person' : 'people'}</p>
+                <p className="text-[13px] text-ink-3 num">Owed to you {formatEGP(owedToYou)} · You owe {formatEGP(youOwe)}</p>
+              </div>
+              <ChevronRight className="size-4 text-ink-4" />
+            </div>
+          </Card>
+        </Section>
+      )}
 
       {creating && (
         <AccountFormModal

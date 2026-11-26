@@ -7,7 +7,7 @@
 
 import { db } from '../db';
 import { toLocalDateInput } from '../utils/format';
-import type { Account, Transaction, Category, Budget, SavingsGoal } from '../types';
+import type { Account, Transaction, Category, Budget, SavingsGoal, Person, Debt, CategoryRule, RecurringIncome } from '../types';
 
 export interface PennyBackupData {
   appName: 'Penny';
@@ -26,6 +26,11 @@ export interface PennyBackupData {
     categories: Category[];
     budgets: Budget[];
     goals: SavingsGoal[];
+    /** Added in schema 7 — optional so older backups still restore. */
+    people?: Person[];
+    debts?: Debt[];
+    categoryRules?: CategoryRule[];
+    recurring?: RecurringIncome[];
   };
 }
 
@@ -33,17 +38,21 @@ export interface PennyBackupData {
  * Generate full backup object from current IndexedDB.
  */
 export async function generateBackupData(): Promise<PennyBackupData> {
-  const [accounts, transactions, categories, budgets, goals] = await Promise.all([
+  const [accounts, transactions, categories, budgets, goals, people, debts, categoryRules, recurring] = await Promise.all([
     db.accounts.toArray(),
     db.transactions.toArray(),
     db.categories.toArray(),
     db.budgets.toArray(),
     db.goals.toArray(),
+    db.people.toArray(),
+    db.debts.toArray(),
+    db.categoryRules.toArray(),
+    db.recurring.toArray(),
   ]);
 
   return {
     appName: 'Penny',
-    schemaVersion: 4,
+    schemaVersion: 7,
     exportDate: new Date().toISOString(),
     stats: {
       accountsCount: accounts.length,
@@ -58,6 +67,10 @@ export async function generateBackupData(): Promise<PennyBackupData> {
       categories,
       budgets,
       goals,
+      people,
+      debts,
+      categoryRules,
+      recurring,
     },
   };
 }
@@ -134,6 +147,16 @@ export function validateBackupData(
         targetDate: g.targetDate ? new Date(g.targetDate) : null,
         createdAt: g.createdAt ? new Date(g.createdAt) : new Date(),
       })) : [],
+      people: Array.isArray(data.people) ? (data.people as Person[]).map(p => ({ ...p, createdAt: new Date(p.createdAt ?? Date.now()) })) : [],
+      debts: Array.isArray(data.debts) ? (data.debts as Debt[]).map(d => ({
+        ...d,
+        date: new Date(d.date),
+        dueDate: d.dueDate ? new Date(d.dueDate) : null,
+        createdAt: new Date(d.createdAt ?? Date.now()),
+        repayments: (d.repayments ?? []).map(r => ({ ...r, date: new Date(r.date) })),
+      })) : [],
+      categoryRules: Array.isArray(data.categoryRules) ? (data.categoryRules as CategoryRule[]).map(r => ({ ...r, createdAt: new Date(r.createdAt ?? Date.now()) })) : [],
+      recurring: Array.isArray(data.recurring) ? (data.recurring as RecurringIncome[]).map(r => ({ ...r, createdAt: new Date(r.createdAt ?? Date.now()) })) : [],
     },
   };
 
@@ -155,11 +178,7 @@ export async function restoreBackupData(
 }> {
   return await db.transaction(
     'rw',
-    db.accounts,
-    db.transactions,
-    db.categories,
-    db.budgets,
-    db.goals,
+    [db.accounts, db.transactions, db.categories, db.budgets, db.goals, db.people, db.debts, db.categoryRules, db.recurring],
     async () => {
       if (mode === 'overwrite') {
         await Promise.all([
@@ -168,6 +187,10 @@ export async function restoreBackupData(
           db.categories.clear(),
           db.budgets.clear(),
           db.goals.clear(),
+          db.people.clear(),
+          db.debts.clear(),
+          db.categoryRules.clear(),
+          db.recurring.clear(),
         ]);
       }
 
@@ -231,6 +254,19 @@ export async function restoreBackupData(
             if (!exists) await db.goals.add(g);
           }
         }
+      }
+
+      // Newer tables (absent in old backups). Overwrite replaces; merge keeps existing ids.
+      const extra = [
+        [db.people, backup.data.people],
+        [db.debts, backup.data.debts],
+        [db.categoryRules, backup.data.categoryRules],
+        [db.recurring, backup.data.recurring],
+      ] as const;
+      for (const [table, rows] of extra) {
+        if (!rows?.length) continue;
+        if (mode === 'overwrite') await (table as typeof db.people).bulkPut(rows as never);
+        else for (const r of rows as Array<{ id?: number }>) if (!(r.id && (await (table as typeof db.people).get(r.id)))) await (table as typeof db.people).put(r as never);
       }
 
       return {

@@ -11,6 +11,9 @@ import { formatEGP, formatWhole } from '../utils/format';
 import { TrendChart } from '../components/dashboard/TrendChart';
 import { CategoryBreakdown } from '../components/dashboard/CategoryBreakdown';
 import { MonthInsights } from '../components/dashboard/MonthInsights';
+import { AdviceList } from '../components/dashboard/AdviceList';
+import { getAdvice, type Advice } from '../services/advice';
+import { isStoragePersisted } from '../services/storageSafety';
 import { AccountIcon, Amount, Card, EmptyState, IconButton, MonthSwitcher, PageHeader, Section, Segmented, Skeleton, cx } from '../components/ui';
 import type { Page } from '../types';
 
@@ -37,6 +40,7 @@ export function Reports({ onNavigate }: { onNavigate: (p: Page) => void }) {
           { value: 'year', label: 'Year' },
         ]}
       />
+      <HealthChecks onNavigate={onNavigate} />
       {mode === 'month' ? (
         <MonthReport key={`${sel.year}-${sel.month}`} sel={sel} onNavigate={onNavigate} />
       ) : (
@@ -270,5 +274,31 @@ function YearReport({ year, today, onYear, onOpenMonth }: { year: number; today:
         </>
       )}
     </div>
+  );
+}
+
+/** All current warnings, each with the guideline it's based on. */
+function HealthChecks({ onNavigate }: { onNavigate: (p: Page) => void }) {
+  const [items, setItems] = useState<Advice[] | null>(null);
+  const txns = useLiveQuery(() => db.transactions.count());
+  useEffect(() => {
+    let cancelled = false;
+    isStoragePersisted()
+      .then((p) => getAdvice({ storagePersisted: p }))
+      .then((a) => !cancelled && setItems(a));
+    return () => {
+      cancelled = true;
+    };
+  }, [txns]);
+  if (!items) return null;
+  return (
+    <Section title={items.length ? `Health checks · ${items.length}` : 'Health checks'}>
+      {items.length === 0 ? (
+        <Card className="text-sm text-ink-2">Nothing to flag — spending, savings, budgets and debts all look within common guidelines.</Card>
+      ) : (
+        <AdviceList items={items} onNavigate={onNavigate} />
+      )}
+      <p className="text-[12px] text-ink-3 px-1">Based on widely used rules of thumb (50/30/20 budgeting, a 3–6 month emergency fund, debt under ~36% of income). Not financial advice.</p>
+    </Section>
   );
 }

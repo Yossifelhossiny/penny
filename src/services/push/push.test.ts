@@ -103,7 +103,7 @@ describe('service worker push handling', () => {
   it('saves the SMS while Penny is closed and words the notification', async () => {
     const notice = await handlePushPayload({ v: 1, secret: 's3cret', kind: 'sms', received: '2026-11-26T15:00:00+02:00', sender: 'BanK-AlAhly', text: IN_SMS });
     expect(await db.transactions.count()).toBe(1);
-    expect(notice?.title).toContain('فلوس دخلت');
+    expect(notice?.title).toContain('فلوس جاتلك من AHMED M******');
     expect(notice?.body).toContain('+500 ج.م');
     expect(notice?.body).toContain('عندك 1 معاملة من غير تصنيف');
     expect(notice).toMatchObject({ page: 'transactions', filter: 'uncategorized' });

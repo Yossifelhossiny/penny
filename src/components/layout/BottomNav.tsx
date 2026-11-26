@@ -12,7 +12,7 @@ const tabs: { page: Page; label: string; icon: LucideIcon; also?: Page[] }[] = [
   { page: 'dashboard', label: 'Home', icon: House, also: ['budgets'] },
   { page: 'transactions', label: 'Activity', icon: ReceiptText, also: ['import'] },
   { page: 'reports', label: 'Reports', icon: ChartColumn },
-  { page: 'accounts', label: 'Accounts', icon: Wallet },
+  { page: 'accounts', label: 'Accounts', icon: Wallet, also: ['people'] },
 ];
 
 /**

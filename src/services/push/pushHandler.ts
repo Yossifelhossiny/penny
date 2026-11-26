@@ -9,6 +9,7 @@
 
 import { db } from '../../db';
 import { importSmsEntries, countUncategorizedTransactions } from '../sms/smsInboxService';
+import { runRecurringIncome } from '../recurring';
 
 export const PUSH_META_KEY = 'autoImportPush';
 
@@ -62,6 +63,9 @@ export async function handlePushPayload(raw: unknown): Promise<PushNotice | null
     };
   }
 
+  // A push wakes Penny even when closed — a good moment to add due monthly income.
+  await runRecurringIncome().catch(() => {});
+
   const text = (data.text ?? '').trim();
   if (!text) return null;
   const receivedAt = data.received ? new Date(data.received) : new Date();
@@ -79,14 +83,23 @@ export async function handlePushPayload(raw: unknown): Promise<PushNotice | null
   if (result.status === 'saved') {
     const uncategorized = await countUncategorizedTransactions();
     const sign = result.action === 'income' ? '+' : result.action === 'expense' ? '−' : '';
-    const who = result.counterparty ? ` · ${result.counterparty}` : '';
-    const first = `${sign}${egp(result.amountPiastres)}${who}`;
+    const amount = `${sign}${egp(result.amountPiastres)}`;
+    const who = result.personName
+      ? result.action === 'income'
+        ? `من ${result.personName}`
+        : `لـ ${result.personName}`
+      : result.counterparty ?? '';
+    const lines = [[amount, who].filter(Boolean).join(' · ')];
+    if (result.categoryName) lines.push(`اتسجلت في ${result.categoryName}.`);
+    if (uncategorized > 0) {
+      lines.push(`عندك ${uncategorized} ${uncategorized === 1 ? 'معاملة' : 'معاملات'} من غير تصنيف — ادخل ظبطها.`);
+    }
     return {
-      title: result.action === 'income' ? 'Penny · فلوس دخلت' : result.action === 'transfer' ? 'Penny · تحويل' : 'Penny · مصروف جديد',
-      body:
-        uncategorized > 0
-          ? `${first}\nعندك ${uncategorized} ${uncategorized === 1 ? 'معاملة' : 'معاملات'} من غير تصنيف — ادخل ظبطها.`
-          : first,
+      title:
+        result.action === 'income'
+          ? result.personName ? `Penny · فلوس جاتلك من ${result.personName}` : 'Penny · فلوس دخلت'
+          : result.action === 'transfer' ? 'Penny · تحويل' : 'Penny · مصروف جديد',
+      body: lines.join('\n'),
       page: uncategorized > 0 ? 'transactions' : 'dashboard',
       filter: uncategorized > 0 ? 'uncategorized' : undefined,
       tag: 'penny-uncategorized',

@@ -81,6 +81,8 @@ interface AddTransactionInput {
   originalSms?: string;
   smsFingerprint?: string;
   referenceId?: string;
+  personId?: number;
+  recurringKey?: string;
 }
 
 /**
@@ -103,6 +105,8 @@ export async function addIncome(input: Omit<AddTransactionInput, 'type'>): Promi
     originalSms: input.originalSms,
     smsFingerprint: input.smsFingerprint,
     referenceId: input.referenceId,
+    ...(input.personId ? { personId: input.personId } : {}),
+    ...(input.recurringKey ? { recurringKey: input.recurringKey } : {}),
   };
 
   const id = await db.transactions.add(txn);
@@ -129,6 +133,8 @@ export async function addExpense(input: Omit<AddTransactionInput, 'type'>): Prom
     originalSms: input.originalSms,
     smsFingerprint: input.smsFingerprint,
     referenceId: input.referenceId,
+    ...(input.personId ? { personId: input.personId } : {}),
+    ...(input.recurringKey ? { recurringKey: input.recurringKey } : {}),
   };
 
   const id = await db.transactions.add(txn);

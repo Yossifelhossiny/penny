@@ -1,5 +1,9 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { Account, Transaction, Category, Budget, SavingsGoal, SmsInboxEntry } from '../types';
+import type {
+  Person,
+  Debt,
+  CategoryRule,
+  RecurringIncome, Account, Transaction, Category, Budget, SavingsGoal, SmsInboxEntry } from '../types';
 
 const db = new Dexie('PennyDB') as Dexie & {
   accounts: EntityTable<Account, 'id'>;
@@ -9,6 +13,10 @@ const db = new Dexie('PennyDB') as Dexie & {
   goals: EntityTable<SavingsGoal, 'id'>;
   smsInbox: EntityTable<SmsInboxEntry, 'id'>;
   meta: EntityTable<MetaEntry, 'key'>;
+  people: EntityTable<Person, 'id'>;
+  debts: EntityTable<Debt, 'id'>;
+  categoryRules: EntityTable<CategoryRule, 'id'>;
+  recurring: EntityTable<RecurringIncome, 'id'>;
 };
 
 /** Small key-value store (e.g. the automatic-import push settings). */
@@ -16,6 +24,27 @@ export interface MetaEntry {
   key: string;
   value: unknown;
 }
+
+// v6 -> v7: people, debts, learned category rules, recurring income (all additive)
+db.version(7)
+  .stores({
+    accounts: '++id, name, type',
+    transactions: '++id, type, categoryId, accountId, toAccountId, date, smsFingerprint, referenceId, personId, &recurringKey',
+    categories: '++id, name, type',
+    budgets: '++id, categoryId, monthKey',
+    goals: '++id, name, targetDate',
+    smsInbox: '++id, &entryKey, status, receivedAt',
+    meta: '&key',
+    people: '++id, &key',
+    debts: '++id, personId, status',
+    categoryRules: '++id, &[key+type], type',
+    recurring: '++id',
+  })
+  .upgrade(async (tx) => {
+    const cats = tx.table('categories');
+    const hasRent = (await cats.where('name').equals('Rent').toArray()).some((c) => c.type === 'expense');
+    if (!hasRent) await cats.add({ name: 'Rent', icon: '🏠', type: 'expense', color: '#7253d6' });
+  });
 
 // v5 -> v6: add meta (key-value settings readable by the service worker)
 db.version(6).stores({
@@ -127,6 +156,7 @@ export async function seedDefaults() {
       { name: 'Business', icon: '🏢', type: 'income', color: '#8b5cf6' },
       { name: 'Other Income', icon: '📥', type: 'income', color: '#14b8a6' },
       // Expense categories
+      { name: 'Rent', icon: '🏠', type: 'expense', color: '#7253d6' },
       { name: 'Food & Drinks', icon: '🍔', type: 'expense', color: '#f59e0b' },
       { name: 'Transportation', icon: '🚕', type: 'expense', color: '#6366f1' },
       { name: 'Shopping', icon: '🛒', type: 'expense', color: '#ec4899' },
@@ -150,6 +180,8 @@ export async function seedDefaults() {
         color: '#94a3b8',
       });
     }
+    const hasRent = (await db.categories.where('name').equals('Rent').toArray()).some((c) => c.type === 'expense');
+    if (!hasRent) await db.categories.add({ name: 'Rent', icon: '🏠', type: 'expense', color: '#7253d6' });
   }
 }
 

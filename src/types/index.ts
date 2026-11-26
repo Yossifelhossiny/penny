@@ -32,6 +32,71 @@ export interface Transaction {
   smsFingerprint?: string;
   /** Reference / Transaction ID from SMS. */
   referenceId?: string;
+  /** Person this money came from / went to (InstaPay, wallet transfers, debts). */
+  personId?: number;
+  /** Set on entries created by a recurring rule: "rec:<id>:<YYYY-MM>" (prevents doubles). */
+  recurringKey?: string;
+}
+
+/** Someone you exchange money with — created automatically from InstaPay / wallet SMS. */
+export interface Person {
+  id?: number;
+  name: string;
+  /** Normalised name used to match the same person across messages. */
+  key: string;
+  phone?: string;
+  note?: string;
+  createdAt: Date;
+}
+
+export type DebtDirection = 'lent' | 'borrowed';
+
+export interface DebtRepayment {
+  amountPiastres: number;
+  date: Date;
+  note?: string;
+}
+
+/** Money you lent to someone, or borrowed from someone. Doesn't move account balances. */
+export interface Debt {
+  id?: number;
+  personId: number;
+  direction: DebtDirection;
+  amountPiastres: number;
+  reason?: string;
+  date: Date;
+  dueDate?: Date | null;
+  repayments: DebtRepayment[];
+  status: 'open' | 'settled';
+  createdAt: Date;
+}
+
+/** "Messages from X belong to category Y" — learned from you, or built in. */
+export interface CategoryRule {
+  id?: number;
+  /** Normalised merchant / person text. */
+  key: string;
+  type: 'income' | 'expense';
+  categoryId: number;
+  /** exact = the whole normalised name; contains = keyword inside the name. */
+  match: 'exact' | 'contains';
+  source: 'user' | 'builtin';
+  createdAt: Date;
+}
+
+/** A monthly income Penny records by itself (e.g. salary on the 1st). */
+export interface RecurringIncome {
+  id?: number;
+  name: string;
+  amountPiastres: number;
+  accountId: number;
+  categoryId: number;
+  /** 1–28 */
+  dayOfMonth: number;
+  enabled: boolean;
+  /** First month to record, "YYYY-MM". */
+  startMonth: string;
+  createdAt: Date;
 }
 
 export interface Category {
@@ -96,4 +161,4 @@ export interface SmsInboxEntry {
   updatedAt: Date;
 }
 
-export type Page = 'dashboard' | 'transactions' | 'accounts' | 'settings' | 'import' | 'budgets' | 'reports' | 'categories';
+export type Page = 'dashboard' | 'transactions' | 'accounts' | 'settings' | 'import' | 'budgets' | 'reports' | 'categories' | 'people';

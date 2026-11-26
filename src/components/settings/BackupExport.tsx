@@ -2,7 +2,7 @@
  * Backup, restore and CSV export. Everything stays on the device.
  */
 import { useRef, useState } from 'react';
-import { Download, FileSpreadsheet, Upload } from 'lucide-react';
+import { FileSpreadsheet, Upload } from 'lucide-react';
 import { downloadJsonBackup, downloadTransactionsCsv, validateBackupData, restoreBackupData, type PennyBackupData } from '../../services/backup';
 import { ConfirmSheet, ListRow, useToasts } from '../ui';
 
@@ -54,7 +54,6 @@ export function BackupExport() {
 
   return (
     <>
-      <ListRow icon={<Download />} label="Download backup" detail="Everything, as one file" onClick={() => run('backup')} busy={busy === 'backup'} disabled={!!busy} />
       <ListRow icon={<Upload />} label="Restore from backup" detail="Replaces what’s on this device" onClick={() => fileInputRef.current?.click()} busy={busy === 'restore'} disabled={!!busy} />
       <ListRow icon={<FileSpreadsheet />} label="Export to CSV" detail="Opens in Excel or Google Sheets" onClick={() => run('csv')} busy={busy === 'csv'} disabled={!!busy} />
       <input ref={fileInputRef} type="file" accept=".json,application/json" className="hidden" onChange={pickFile} />

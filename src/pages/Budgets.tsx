@@ -17,6 +17,7 @@ import { useMonthSelection } from '../hooks/useMonthSelection';
 import { BudgetModal } from '../components/budgets/BudgetModal';
 import { SavingsGoalModal } from '../components/budgets/SavingsGoalModal';
 import { ContributeGoalModal } from '../components/budgets/ContributeGoalModal';
+import { BudgetPlanCard } from '../components/budgets/BudgetPlanCard';
 import { Amount, Badge, Button, Card, CategoryIcon, EmptyState, IconButton, MonthSwitcher, PageHeader, ProgressBar, Section, Segmented, cx } from '../components/ui';
 
 interface Props {
@@ -137,6 +138,8 @@ export function Budgets({ onNavigate }: Props) {
               />
             )}
           </Card>
+
+          <BudgetPlanCard year={year} month={month} version={allBudgets} />
 
           <Section title="By category">
             {budgets.length === 0 ? (

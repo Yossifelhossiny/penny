@@ -3,9 +3,10 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { ArrowDown, Check } from 'lucide-react';
 import { db } from '../../db';
 import { addIncome, addExpense, addTransfer, editTransaction, getAllBalances } from '../../services/transactions';
+import { applyCategoryToMatching, countUncategorizedMatching, learnCategory } from '../../services/categoryRules';
 import { toPiastres, toLocalDateTimeInput, formatEGP } from '../../utils/format';
 import type { TransactionType } from '../../types';
-import { AmountInput, Banner, Button, CategoryIcon, Field, Segmented, Select, Sheet, TextInput, cx } from '../ui';
+import { AmountInput, Banner, Button, CategoryIcon, Field, Segmented, Select, Sheet, TextInput, Toggle, cx } from '../ui';
 
 export type EntryMode = 'expense' | 'income' | 'transfer';
 
@@ -115,6 +116,15 @@ function IncomeExpenseFields({
 
   const accounts = useLiveQuery(() => db.accounts.toArray());
   const categories = useLiveQuery(() => db.categories.where('type').equals(type).toArray(), [type]);
+  const [applySimilar, setApplySimilar] = useState(true);
+  // Other uncategorized transactions from the same merchant/person.
+  const similar = useLiveQuery(
+    async () => (merchant.trim() ? countUncategorizedMatching(merchant, type, editing?.id) : 0),
+    [merchant, type, editing?.id],
+    0
+  );
+  const chosen = categories?.find((c) => c.id === categoryId);
+  const canLearn = !!merchant.trim() && !!chosen && !/^uncategorized$/i.test(chosen.name);
 
   // Default to the first account once accounts load.
   if (accountId === 0 && accounts && accounts.length > 0 && !editing) {
@@ -143,6 +153,11 @@ function IncomeExpenseFields({
       if (editing) await editTransaction(editing.id, { ...payload, type });
       else if (type === 'income') await addIncome(payload);
       else await addExpense(payload);
+      // Remember this merchant/person → category for future SMS.
+      if (canLearn) {
+        await learnCategory(merchant, type, categoryId);
+        if (applySimilar && similar > 0) await applyCategoryToMatching(merchant, type, categoryId, editing?.id);
+      }
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save');
@@ -217,6 +232,22 @@ function IncomeExpenseFields({
       <Field label="Note">
         <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" autoComplete="off" />
       </Field>
+
+      {canLearn && (
+        <div className="rounded-2xl bg-brand-50 px-4 py-3 space-y-2.5">
+          <p className="text-[13px] text-brand-800">
+            Penny will file future SMS from <span className="font-semibold" dir="auto">{merchant.trim()}</span> under <span className="font-semibold">{chosen?.name}</span>.
+          </p>
+          {similar > 0 && (
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[13px] font-semibold text-ink">
+                Also move {similar} uncategorized {similar === 1 ? 'transaction' : 'transactions'} from them
+              </span>
+              <Toggle label="Apply to similar transactions" checked={applySimilar} onChange={setApplySimilar} />
+            </div>
+          )}
+        </div>
+      )}
 
       {error && <Banner tone="error">{error}</Banner>}
     </form>
